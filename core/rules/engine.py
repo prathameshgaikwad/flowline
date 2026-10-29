@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.geometry import Point, inflate_bbox, polyline_length, rects_overlap, segment_intersects_bbox
+from core.geometry import (
+    Point,
+    inflate_bbox,
+    polyline_length,
+    rects_overlap,
+    segment_intersects_bbox,
+)
 from core.layout import _door_zone, _front_distance, _side_distance, _stack_zone
 from core.models import Building, Design, FixtureType, Severity, System, ValidationResult
 
@@ -110,7 +116,7 @@ class RuleProfile(BaseModel):
         return float(self.fixture_units.get(key, 0.0))
 
 
-@lru_cache(maxsize=None)
+@cache
 def load_profile(profile_id: str) -> RuleProfile:
     path = PROFILE_DIR / f"{profile_id}.yaml"
     if not path.exists():

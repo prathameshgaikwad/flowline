@@ -1,18 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
 
 from core.dxf_export import export_design
 from core.fixes import FixError, apply_fix, recommend_fixes
-from core.geometry import Point
 from core.layout import generate_layouts
 from core.models import (
     Building,
     Design,
-    FixtureType,
     Fix,
+    FixtureType,
     LayoutCandidate,
     Severity,
     Stack,

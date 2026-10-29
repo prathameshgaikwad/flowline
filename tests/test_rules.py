@@ -1,10 +1,9 @@
-import pytest
 
 from core.dxf_import import import_dxf
 from core.fixtures import make_fixture
 from core.geometry import Point
 from core.layout import generate_layouts
-from core.models import Building, Design, FixtureType, Room, Stack, System
+from core.models import Building, Design, FixtureType, Room, Stack
 from core.router import route_design
 from core.rules.engine import (
     available_profiles,

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class Units(str, Enum):
+class Units(StrEnum):
     MILLIMETERS = "mm"
     CENTIMETERS = "cm"
     METERS = "m"

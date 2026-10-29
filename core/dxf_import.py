@@ -5,7 +5,7 @@ from pathlib import Path
 
 import ezdxf
 
-from core.geometry import BBox, Point, bbox, distance, point_in_polygon, polygon_area
+from core.geometry import Point, bbox, distance, point_in_polygon, polygon_area
 from core.models import Building, Door, DrawingEntity, Room, Shaft
 from core.units import unit_scale
 

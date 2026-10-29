@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from core.geometry import BBox, Point, bbox, point_in_polygon, polygon_area
 
 
-class FixtureType(str, Enum):
+class FixtureType(StrEnum):
     WC = "WC"
     BASIN = "BASIN"
     SHOWER = "SHOWER"
@@ -16,13 +16,13 @@ class FixtureType(str, Enum):
     KITCHEN_SINK = "KITCHEN_SINK"
 
 
-class System(str, Enum):
+class System(StrEnum):
     SOIL = "SOIL"
     WASTE = "WASTE"
     VENT = "VENT"
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     PASS = "PASS"
     WARNING = "WARNING"
     ERROR = "ERROR"

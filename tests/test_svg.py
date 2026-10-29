@@ -4,8 +4,8 @@ from core.dxf_import import import_dxf
 from core.fixtures import make_fixture
 from core.geometry import Point
 from core.models import Design, FixtureType, Pipe, Stack, System
-from core.svg import render_svg
 from core.sample_plan import build_apartment
+from core.svg import render_svg
 
 
 def test_renders_plan_with_rooms_doors_and_shaft(tmp_path):

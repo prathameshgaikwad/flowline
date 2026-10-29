@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import socket
 import time
 import urllib.error
 import urllib.request
@@ -116,7 +115,7 @@ class ChatCompletionsProvider(LLMProvider):
                     time.sleep(self._retry_delays[attempt])
                     continue
                 raise LLMError(f"{self.name} HTTP {exc.code}: {detail}") from exc
-            except (TimeoutError, socket.timeout) as exc:
+            except TimeoutError as exc:
                 last_error = exc
                 if attempt < len(self._retry_delays):
                     time.sleep(self._retry_delays[attempt])

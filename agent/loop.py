@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from typing import Callable
+from collections.abc import Callable
 
 from agent.logging import ActionLogger
 from agent.prompt import SYSTEM_PROMPT, build_context

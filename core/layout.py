@@ -58,7 +58,7 @@ def generate_layouts(
         for alignments in _alignment_product(len(groups)):
             fixtures: list[Fixture] = []
             failed = False
-            for (wall_id, group_types), alignment in zip(groups, alignments):
+            for (wall_id, group_types), alignment in zip(groups, alignments, strict=False):
                 placed = _place_group(
                     wall_map[wall_id], group_types, alignment, room, door_zone
                 )
@@ -180,8 +180,7 @@ def _pattern_variants(walls: list[Wall], types: list[FixtureType]):
 
 def _alignment_product(count: int):
     options = ("start", "end", "center")
-    for values in product(options, repeat=count):
-        yield values
+    yield from product(options, repeat=count)
 
 
 def _place_group(

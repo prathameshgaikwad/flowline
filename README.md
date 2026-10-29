@@ -1,12 +1,31 @@
 # Flowline
 
-Agentic bathroom plumbing design for AutoCAD-native workflows.
+**Agentic bathroom plumbing design for AutoCAD-native workflows.**
 
 Flowline reads a DXF floor plan, generates ranked bathroom drainage layouts, lets a Meta Muse Spark agent choose and explain one, routes the drainage to a stack, validates the result against cited India and US rule packs, applies deterministic fixes, and exports an AutoCAD-ready DXF.
 
 The language model coordinates. The geometry, sizing, routing, and rule checks are deterministic.
 
-**Status:** Hackathon MVP in progress (Meta Global AI Developer Hackathon, Indie track). Not a compliance tool.
+![Flowline designing a bathroom](docs/ui-design.png)
+
+**Hackathon MVP.** Meta Global AI Developer Hackathon, Indie track. New work built during the event. Not a compliance tool.
+
+## What it does
+
+1. **Import a real plan.** Read units, closed rooms, door markers, shafts, labels, and background geometry from DXF.
+2. **Generate layouts.** The engine produces ranked bathroom layouts (wet wall, split, corner shower, opposite, in-line) with footprint, clearance, door, and stack checks.
+3. **Let the agent choose.** Muse Spark inspects the plan, compares candidates, picks one with a short rationale, and never invents a dimension.
+4. **Route and size.** Orthogonal A* avoids fixtures and the door swing; pipe sizes and slopes come from the selected rule pack.
+5. **Validate with sources.** Every result has a rule ID, measured value, required value, and citation. PASS/WARNING/ERROR counts are shown live.
+6. **Fix and revalidate.** Deterministic fixes switch layouts, reroute pipes, or adjust sizes/slopes. The agent applies them one at a time.
+7. **Approve and export.** The engineer reviews, approves, and downloads a DXF with `P-*` layers that opens in ordinary AutoCAD.
+
+## Why this is different
+
+- **No LLM math.** Pipe sizes, slopes, geometry, and rule outcomes never come from the model.
+- **Rule packs are data.** India (`NBC 2016` / `IS 1742` with IPC clearances) and US (`IPC 2021`) profiles are switchable and cited.
+- **Agentic, not a wrapper.** The trace shows inspect → generate → select → route → validate → fix → explain.
+- **CAD-native.** DXF in, DXF out. No Revit requirement; no AutoCAD MEP requirement.
 
 ## Quick start
 
@@ -17,44 +36,72 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Add your Meta key to `.env` (`META_API_KEY=...`) or use OpenRouter (`OPENROUTER_API_KEY=...`). Without either, the fake provider runs the scripted demo.
+Add a Meta Model API key to `.env`:
+
+```dotenv
+META_API_KEY=...
+META_MODEL=muse-spark-1.3
+```
+
+Without a key, the offline fake provider runs the same tool workflow.
 
 ```powershell
 python scripts/check_provider.py
 python scripts/make_sample_plan.py
-python scripts/demo_cli.py --provider fake --sample samples/apartment.dxf
+python scripts/demo_cli.py --provider auto --approve
 uvicorn app.main:app --reload
 ```
 
-Open http://127.0.0.1:8000.
+Open <http://127.0.0.1:8000>. The app auto-loads a sample apartment. Upload your own DXF or switch to the tight-bathroom sample.
 
 ## Provider strategy
 
 ```text
-LLM_PROVIDER=auto
+LLM_PROVIDER=auto (default)
   META_API_KEY or MODEL_API_KEY -> Meta Model API (muse-spark-1.3)
   OPENROUTER_API_KEY            -> OpenRouter
-  otherwise                     -> fake/scripted
+  otherwise                     -> FakeProvider (offline scripted agent)
 ```
 
-Set `LLM_PROVIDER=meta`, `openrouter`, or `fake` to override. Missing keys for an explicit provider fail fast.
+Explicit `LLM_PROVIDER=meta|openrouter|fake` overrides auto. An explicit provider without its key fails fast. Keys are never logged or committed.
 
-## Layout
+## Architecture
 
 ```text
-app/              FastAPI app, static UI, jobs, SSE
-core/             units, geometry, models, DXF import/export, layout, router, rules, fixes, SVG
-agent/            tools, prompt, loop, audit log, provider strategy
-scripts/          samples, CLI demo, provider check, AutoCAD handoff
-tests/            unit, integration, API, and end-to-end tests
-docs/             design, standards, plan, demo script
+Browser (SVG plan, agent trace, validation, approval)
+        |
+FastAPI + SSE jobs
+        |
+Agent loop ---- provider factory
+        |         |-- MetaProvider
+        |         |-- OpenRouterProvider
+        |         |-- FakeProvider
+        |
+Deterministic tools
+        |-- inspect_plan
+        |-- list_layout_options
+        |-- select_layout
+        |-- route_drainage
+        |-- validate_design
+        |-- apply_fix
+        |-- explain_design
+        |-- export_dxf (approval-gated)
+        |
+Core engine
+        |-- DXF import/export
+        |-- geometry + units
+        |-- layout generator
+        |-- A* router
+        |-- cited rule packs
+        |-- deterministic fixes
+        |-- SVG renderer
 ```
 
-## Standards
+## Rule packs
 
-v1 ships two small cited packs: `india_nbc_2016` and `us_ipc_2021`. Every rule result includes a source. See [docs/standards.md](docs/standards.md).
+`core/rules/profiles/india_nbc_2016.yaml` and `us_ipc_2021.yaml` encode a deliberately small, cited subset: room minimums, fixture clearances, spacing, shower size, pipe sizes, slopes, stack minimums, vent-distance warnings, and fixture units. See [docs/standards.md](docs/standards.md) for values and sources.
 
-> Flowline is a design assistant. It checks a small, cited rule pack, not the full code. A licensed engineer and the local authority govern the issued design.
+> Flowline is a design assistant. It checks a small, cited rule pack, not the full code. The local authority and a licensed engineer govern the issued design.
 
 ## Tests
 
@@ -63,6 +110,52 @@ pytest -q
 python -m compileall app core agent scripts
 ```
 
+The suite covers units, geometry, DXF import, layout generation, routing, both rule packs, fixes, provider strategy, Meta/OpenRouter payload parsing, agent tools/loop, API, DXF export, and an end-to-end CLI run.
+
+UI smoke test (starts the app on port 8000):
+
+```powershell
+python C:\Users\prath\.config\opencode\skill\webapp-testing\scripts\with_server.py `
+  --server "python -m uvicorn app.main:app --host 127.0.0.1 --port 8000" `
+  --port 8000 -- python scripts/ui_smoke.py
+```
+
+## Layout
+
+```text
+app/              FastAPI app, SSE jobs, static UI
+core/             units, geometry, models, DXF import/export, layout, router, rules, fixes, SVG
+agent/            tools, prompt, loop, audit log, provider strategy
+scripts/          sample generator, CLI demo, provider check, AutoCAD handoff, UI smoke
+samples/          apartment and tight-bathroom DXFs
+tests/            unit, integration, API, and E2E tests
+docs/             design, standards, demo script, AutoCAD notes, plan
+```
+
+## Limitations (v1)
+
+- Drainage-only. Water supply and vent piping are not modeled; long branches are warnings.
+- Simple rectangular rooms. The layout uses the room bounding box and warns on non-rectangular rooms.
+- Clean DXF plans. Legacy polylines, xrefs, and heavily blocked plans need hardening.
+- POC rule packs, not compliance certificates.
+- No DWG write. Use AutoCAD to save the exported DXF as DWG.
+- Live AutoCAD is a separate script, not part of the web server.
+
+## Roadmap
+
+1. Water supply + vent design, kitchen and multi-room layouts.
+2. PDF/image intake using Muse vision, with human confirmation.
+3. DWG/ODA, AutoCAD LT file-IPC or .NET plugin, then Revit/IFC.
+4. Rule-pack authoring, project versions, engineer sign-off, BOQ.
+5. Per-seat SaaS + metered drawing automation for small MEP firms.
+
+## Hackathon notes
+
+- New public repo; first commit on 2026-10-29, during the event. The older private POC is not a dependency.
+- 3-minute demo script: [docs/demo-script.md](docs/demo-script.md).
+- Design: [docs/design.md](docs/design.md). AutoCAD: [docs/autocad.md](docs/autocad.md).
+- Meta Model API is the primary provider; OpenRouter is a development fallback; the fake provider is for tests and offline demos.
+
 ## License
 
-MIT
+MIT.

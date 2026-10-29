@@ -1,6 +1,5 @@
 from core.dxf_import import import_dxf
 from core.fixes import apply_fix, recommend_fixes
-from core.geometry import Point
 from core.layout import generate_layouts
 from core.models import Design, FixtureType, Stack
 from core.router import route_design

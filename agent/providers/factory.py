@@ -7,12 +7,20 @@ from agent.providers.base import ConfigError, LLMProvider
 from agent.providers.fake import FakeProvider
 from agent.providers.meta import (
     DEFAULT_BASE_URL as META_DEFAULT_BASE_URL,
+)
+from agent.providers.meta import (
     DEFAULT_MODEL as META_DEFAULT_MODEL,
+)
+from agent.providers.meta import (
     MetaProvider,
 )
 from agent.providers.openrouter import (
     DEFAULT_BASE_URL as OPENROUTER_DEFAULT_BASE_URL,
+)
+from agent.providers.openrouter import (
     DEFAULT_MODEL as OPENROUTER_DEFAULT_MODEL,
+)
+from agent.providers.openrouter import (
     OpenRouterProvider,
 )
 

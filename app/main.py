@@ -7,14 +7,13 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-import config  # noqa: F401  (loads .env)
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+import config  # noqa: F401  (loads .env)
 from agent.logging import ActionLogger
 from agent.loop import AgentRunner
 from agent.providers.base import ConfigError
@@ -24,8 +23,7 @@ from app.jobs import Job, JobManager
 from app.schemas import ApproveRequest, DesignRequest, FixRequest
 from core.dxf_import import DxfImportError, import_dxf
 from core.fixes import FixError, apply_fix, recommend_fixes
-from core.geometry import Point
-from core.models import Building, FixtureType, Severity, Stack
+from core.models import Building, Severity, Stack
 from core.rules.engine import (
     available_profiles,
     load_profile,
@@ -103,7 +101,7 @@ def profiles() -> dict:
 
 
 @app.post("/api/projects")
-async def upload_project(file: UploadFile = File(...)) -> dict:
+async def upload_project(file: UploadFile = File(...)) -> dict:  # noqa: B008
     filename = Path(file.filename or "plan.dxf").name
     if Path(filename).suffix.lower() != ".dxf":
         raise HTTPException(status_code=400, detail="Only .dxf files are supported.")
