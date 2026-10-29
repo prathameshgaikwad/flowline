@@ -1,11 +1,16 @@
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 
 client = TestClient(app)
 
+
+@pytest.fixture(autouse=True)
+def force_fake_provider(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "fake")
 
 def _sample():
     response = client.post("/api/projects/sample", params={"name": "apartment"})
