@@ -83,6 +83,8 @@ SPECS: dict[FixtureType, FixtureSpec] = {
 
 
 def spec_for(fixture_type: FixtureType | str) -> FixtureSpec:
+    if isinstance(fixture_type, FixtureType):
+        return SPECS[fixture_type]
     return SPECS[FixtureType(str(fixture_type))]
 
 

@@ -128,22 +128,31 @@ class Fixture(BaseModel):
     has_trap: bool = True
 
     @property
+    def half_extents(self) -> tuple[float, float]:
+        if int(round(self.rotation_deg)) % 180 == 90:
+            return self.depth_mm / 2, self.width_mm / 2
+        return self.width_mm / 2, self.depth_mm / 2
+
+    @property
     def bbox(self) -> BBox:
+        half_x, half_y = self.half_extents
         return BBox(
-            self.position.x - self.width_mm / 2,
-            self.position.y - self.depth_mm / 2,
-            self.position.x + self.width_mm / 2,
-            self.position.y + self.depth_mm / 2,
+            self.position.x - half_x,
+            self.position.y - half_y,
+            self.position.x + half_x,
+            self.position.y + half_y,
         )
 
     def drain_point(self, stack: Point) -> Point:
         dx = stack.x - self.position.x
         dy = stack.y - self.position.y
-        if abs(dx) >= abs(dy):
-            offset = self.width_mm / 2 if dx >= 0 else -self.width_mm / 2
-            return Point(x=self.position.x + offset, y=self.position.y)
-        offset = self.depth_mm / 2 if dy >= 0 else -self.depth_mm / 2
-        return Point(x=self.position.x, y=self.position.y + offset)
+        if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+            return self.position
+        half_x, half_y = self.half_extents
+        t_x = half_x / abs(dx) if abs(dx) > 1e-9 else float("inf")
+        t_y = half_y / abs(dy) if abs(dy) > 1e-9 else float("inf")
+        t = min(t_x, t_y)
+        return Point(x=self.position.x + dx * t, y=self.position.y + dy * t)
 
 
 class Pipe(BaseModel):
