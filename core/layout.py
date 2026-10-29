@@ -306,7 +306,7 @@ def _violations(
                 violations.append(f"{fixture.id}: front blocked by {other.id}")
         if door_zone is not None and rects_overlap(box, door_zone):
             violations.append(f"{fixture.id}: door swing")
-        if stack_zone is not None and rects_overlap(inflate_bbox(box, 25), stack_zone):
+        if stack_zone is not None and rects_overlap(box, stack_zone):
             violations.append(f"{fixture.id}: stack/shaft obstruction")
         if fixture.type == FixtureType.SHOWER and (
             fixture.width_mm < 762 or fixture.depth_mm < 762

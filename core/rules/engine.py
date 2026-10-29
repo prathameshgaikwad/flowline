@@ -567,23 +567,6 @@ def _pipe_results(building, room, design, profile: RuleProfile) -> list[Validati
             )
         )
 
-        short_segments = [
-            index
-            for index in range(len(pipe.points) - 1)
-            if _segment_length(pipe.points[index], pipe.points[index + 1]) < 5
-        ]
-        results.append(
-            _check(
-                "PIPE_MIN_SEGMENT",
-                not short_segments,
-                f"{pipe.id} has {len(short_segments)} segment(s) shorter than 5 mm.",
-                "Flowline geometry",
-                affected={"pipe_id": pipe.id},
-                fix_ids=[f"reroute:{pipe.id}"],
-                fail_severity=Severity.WARNING,
-            )
-        )
-
         outside = [
             point
             for point in pipe.points
@@ -742,5 +725,4 @@ def _crossed_fixture(pipe, source_id: str | None, design: Design) -> str | None:
     return None
 
 
-def _segment_length(start: Point, end: Point) -> float:
-    return ((end.x - start.x) ** 2 + (end.y - start.y) ** 2) ** 0.5
+

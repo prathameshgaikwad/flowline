@@ -46,7 +46,7 @@ def render_svg(building: Building, design: Design | None = None, width: int = 12
     for door in building.doors:
         parts.append(
             f'<circle class="door" cx="{door.position.x:.3f}" cy="{sy(door.position.y):.3f}" '
-            f'r="{max(door.width_mm / 2, 150):.3f}"><title>{escape(door.id)}</title></circle>'
+            f'r="140"><title>{escape(door.id)}</title></circle>'
         )
     for shaft in building.shafts:
         parts.append(_render_shaft(shaft, sy))
@@ -210,7 +210,7 @@ def _style() -> str:
   .bg-block { fill: #e5e7eb; stroke: #9ca3af; stroke-width: 12; }
   .room { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 18; }
   .room-label { fill: #475569; font-family: ui-sans-serif, system-ui, sans-serif; }
-  .door { fill: #fef3c7; stroke: #b45309; stroke-width: 18; }
+  .door { fill: none; stroke: #b45309; stroke-width: 20; stroke-dasharray: 70 45; }
   .shaft { fill: #eef2ff; stroke: #4f46e5; stroke-width: 18; stroke-dasharray: 60 40; }
   .fixture { fill: #dbeafe; stroke: #2563eb; stroke-width: 22; }
   .fixture-WC { fill: #e0f2fe; }

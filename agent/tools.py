@@ -44,6 +44,9 @@ class AgentSession:
     approved: bool = False
     exported_path: str | None = None
     applied_fixes: list[str] = field(default_factory=list)
+    provider_name: str = ""
+    model_name: str = ""
+    final_answer: str = ""
 
     def profile(self) -> RuleProfile:
         return load_profile(self.profile_id)
