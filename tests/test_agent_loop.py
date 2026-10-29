@@ -41,6 +41,19 @@ def test_fake_agent_completes_the_workflow(tmp_path):
     assert any(event["type"] == "tool_result" for event in events)
 
 
+def test_fake_agent_uses_the_us_profile(tmp_path):
+    session = make_session(tmp_path)
+    session.profile_id = "us_ipc_2021"
+    runner = AgentRunner(FakeProvider())
+    result = runner.run("Design the bathroom drainage with the US profile.", session)
+    assert result.stopped_reason == "final"
+    assert session.design is not None
+    diameters = {pipe.from_node.split("-")[0]: pipe.diameter_mm for pipe in session.design.pipes}
+    assert diameters["WC"] == 76
+    assert diameters["BASIN"] == 32
+    assert diameters["SHOWER"] == 50
+
+
 def test_repeat_guard(tmp_path):
     session = make_session(tmp_path)
     responses = [
