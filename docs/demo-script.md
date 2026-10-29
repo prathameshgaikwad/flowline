@@ -11,7 +11,23 @@
 5. Close other tabs. Zoom the browser to a readable size. Hide the bookmarks bar.
 6. Have `out/ui-design.png` and `out/DESIGN-01.dxf` ready as backup artifacts.
 
-## Beats
+## Screen cut already recorded
+
+`out/demo.mp4` (also `out/demo.webm`) is a 32-second silent screen capture of the Meta Muse Spark run. It shows the plan, room selection, rule-pack switch, agent trace, validation, and approval. Use it as the visual spine and record a voiceover, or extend it with the beats below.
+
+### 32-second narration
+
+| Time | On screen | Voiceover |
+|---|---|---|
+| 0:00–0:05 | Apartment plan, bathroom selected; provider badge **OpenRouter · meta/muse-spark-1.3**. | "Small MEP teams still draft bathroom drainage by hand. Flowline starts with the plan they already have — a DXF — and a Meta Muse Spark agent." |
+| 0:05–0:10 | US → India rule-pack switch. | "Pick the wet area, the shaft, and the rule pack. The engineering rules stay deterministic and cited." |
+| 0:10–0:22 | Agent trace: inspect, layouts, select, route, validate, fix, explain. | "The agent inspects the plan, compares generated layouts, chooses one with a reason, routes each fixture, and validates. When a clearance warning appears, it applies a fix and revalidates. The model coordinates; Python owns the geometry." |
+| 0:22–0:27 | Validation panel: 54 pass, 1 warning, 0 errors. | "Every result carries its source. This is a POC rule pack, not a compliance certificate, and the UI says so." |
+| 0:27–0:32 | Approve and export; DXF layers visible. | "The engineer approves. Flowline writes the pipes, fixtures, labels, and stack onto the source DXF, ready for AutoCAD. Bathroom drainage first; water supply, venting, and Revit next." |
+
+Upload the finished video to YouTube or Loom and put the public link in `docs/submission.md`.
+
+## Extended 3-minute beats
 
 | Time | On screen | Narration |
 |---|---|---|

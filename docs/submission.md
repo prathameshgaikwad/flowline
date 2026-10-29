@@ -5,7 +5,7 @@
 **Theme:** Build for Your World.
 **Project:** Flowline — agentic bathroom plumbing design for AutoCAD-native workflows.
 **Repo:** https://github.com/prathameshgaikwad/flowline
-**Video:** _add the 3-minute video link before submitting._
+**Video:** _add the public demo video link before submitting. `out/demo.mp4` is the 32-second silent screen cut; see `docs/demo-script.md` for the narration._
 
 ## One-liner
 
@@ -60,7 +60,8 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy .env.example .env
-# add META_API_KEY
+# Preferred: add META_API_KEY from Meta Model API.
+# Fallback: add OPENROUTER_API_KEY and keep OPENROUTER_MODEL=meta/muse-spark-1.3.
 python scripts/check_provider.py
 python scripts/make_sample_plan.py
 uvicorn app.main:app --reload
