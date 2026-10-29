@@ -44,14 +44,16 @@ def build_apartment(path: str | Path) -> str:
     block = doc.blocks.new("DOOR_900")
     block.add_line((0, 0), (900, 0), dxfattribs={"layer": "A-DOOR"})
     block.add_arc((0, 0), 900, 0, 90, dxfattribs={"layer": "A-DOOR"})
-    msp.add_blockref("DOOR_900", (1200, 0), dxfattribs={"layer": "A-DOOR"})
+    msp.add_blockref(
+        "DOOR_900", (0, 900), dxfattribs={"layer": "A-DOOR", "rotation": 90}
+    )
 
     msp.add_lwpolyline(
-        [(2050, 0), (2350, 0), (2350, 300), (2050, 300)],
+        [(2450, 150), (2750, 150), (2750, 450), (2450, 450)],
         close=True,
         dxfattribs={"layer": "A-SHAFT"},
     )
-    _add_label(msp, "SHAFT", (2200, 150), height=100)
+    _add_label(msp, "SHAFT", (2600, 300), height=100)
 
     return _save(doc, path)
 

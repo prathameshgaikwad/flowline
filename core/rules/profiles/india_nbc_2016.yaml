@@ -1,0 +1,57 @@
+id: india_nbc_2016
+name: India - NBC 2016 / IS 1742 (POC)
+region: India
+status: POC
+disclaimer: "POC rule pack. Not a compliance certificate. The local authority and a licensed engineer govern the design."
+room:
+  combined_min_area_m2: 2.8
+  combined_min_width_mm: 1200.0
+  wc_min_area_m2: 1.1
+  wc_min_width_mm: 900.0
+  bathroom_min_area_m2: 1.8
+  door_min_width_mm: 750.0
+  source: "NBC 2016 Part 3"
+clearances:
+  wc_side_min_mm: 380.0
+  wc_side_target_mm: 450.0
+  wc_front_min_mm: 533.0
+  wc_front_target_mm: 600.0
+  basin_side_min_mm: 380.0
+  basin_side_target_mm: 500.0
+  basin_front_min_mm: 533.0
+  basin_front_target_mm: 700.0
+  shower_min_mm: 762.0
+  shower_target_mm: 900.0
+  center_spacing_mm: 762.0
+  shower_access_mm: 559.0
+  source: "IPC 405.3.1 and 421.4 for clearances; IS 2064 cross-check"
+pipes:
+  WC: {system: SOIL, diameter_mm: 100.0}
+  BASIN: {system: WASTE, diameter_mm: 40.0}
+  SHOWER: {system: WASTE, diameter_mm: 50.0}
+  FLOOR_DRAIN: {system: WASTE, diameter_mm: 50.0}
+  KITCHEN_SINK: {system: WASTE, diameter_mm: 50.0}
+slopes:
+  SOIL: {min: 0.01, max: 0.025, default: 0.0167}
+  WASTE: {min: 0.01, max: 0.025, default: 0.02}
+  VENT: {min: 0.0, max: 0.0, default: 0.0}
+stack:
+  min_diameter_mm: 100.0
+  source: "NBC 2016 Part 9; IS 5329"
+vent:
+  min_diameter_mm: 50.0
+  max_branch_mm_warning: 3000.0
+  source: "NBC 2016 Part 9; IPC 909.1 cross-check"
+fixture_units:
+  WC: 4.0
+  BASIN: 1.0
+  SHOWER: 2.0
+  FLOOR_DRAIN: 0.0
+  KITCHEN_SINK: 2.0
+sources:
+  - "NBC 2016 Part 3 - Development Control Rules and General Building Requirements"
+  - "NBC 2016 Part 9 - Plumbing Services"
+  - "IS 1742:1983 - Code of practice for building drainage"
+  - "IS 5329:1983 - Sanitary pipework above ground for buildings"
+  - "IS 2064:1993 - Sanitary appliances"
+  - "IPC 405.3.1 / 421.4 / 709.1 / 909.1 as a cross-check"

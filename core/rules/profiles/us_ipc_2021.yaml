@@ -1,0 +1,54 @@
+id: us_ipc_2021
+name: US - IPC 2021 (POC)
+region: United States
+status: POC
+disclaimer: "POC rule pack. Not a compliance certificate. The local authority and a licensed engineer govern the design."
+room:
+  combined_min_area_m2: 0.0
+  combined_min_width_mm: 0.0
+  wc_min_area_m2: 0.0
+  wc_min_width_mm: 0.0
+  bathroom_min_area_m2: 0.0
+  door_min_width_mm: 750.0
+  source: "IPC does not set room minimums; fixture clearances govern."
+clearances:
+  wc_side_min_mm: 381.0
+  wc_side_target_mm: 450.0
+  wc_front_min_mm: 533.0
+  wc_front_target_mm: 600.0
+  basin_side_min_mm: 381.0
+  basin_side_target_mm: 500.0
+  basin_front_min_mm: 533.0
+  basin_front_target_mm: 700.0
+  shower_min_mm: 762.0
+  shower_target_mm: 900.0
+  center_spacing_mm: 762.0
+  shower_access_mm: 559.0
+  source: "IPC 405.3.1 and 421.4"
+pipes:
+  WC: {system: SOIL, diameter_mm: 76.0}
+  BASIN: {system: WASTE, diameter_mm: 32.0}
+  SHOWER: {system: WASTE, diameter_mm: 50.0}
+  FLOOR_DRAIN: {system: WASTE, diameter_mm: 50.0}
+  KITCHEN_SINK: {system: WASTE, diameter_mm: 50.0}
+slopes:
+  SOIL: {min: 0.0104, max: 0.0417, default: 0.0208}
+  WASTE: {min: 0.0104, max: 0.0417, default: 0.0208}
+  VENT: {min: 0.0, max: 0.0, default: 0.0}
+stack:
+  min_diameter_mm: 76.0
+  source: "IPC Chapter 7; final size per DFU table"
+vent:
+  min_diameter_mm: 32.0
+  max_branch_mm_warning: 2400.0
+  source: "IPC 909.1"
+fixture_units:
+  WC: 3.0
+  BASIN: 1.0
+  SHOWER: 2.0
+  FLOOR_DRAIN: 0.0
+  KITCHEN_SINK: 2.0
+sources:
+  - "IPC 2021 Chapter 4 - Fixtures, faucets and fixture fittings"
+  - "IPC 2021 Chapter 7 - Sanitary drainage"
+  - "IPC 2021 Chapter 9 - Vents"
