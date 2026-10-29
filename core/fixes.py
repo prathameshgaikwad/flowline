@@ -147,7 +147,7 @@ def apply_fix(
             raise FixError(f"Candidate {candidate_id!r} is not available.")
         updated.fixtures = [fixture.model_copy(deep=True) for fixture in candidate.fixtures]
         updated.layout_id = candidate.id
-        updated.rationale = candidate.rationale_hint
+        updated.rationale = fix.description
         try:
             route_design(building, updated, profile)
         except RouteError as exc:
