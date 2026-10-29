@@ -278,6 +278,8 @@ def fix_design(design_id: str, request: FixRequest) -> dict:
     session.fixes = recommend_fixes(
         session.building, updated, session.validation, session.profile(), session.candidates
     )
+    explained = TOOLS["explain_design"].run({}, session)
+    session.final_answer = explained["explanation"]
     with STATE_LOCK:
         DESIGNS[design_id] = session
     return _design_payload(session)

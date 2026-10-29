@@ -13,8 +13,8 @@ class MetaProvider(ChatCompletionsProvider):
         api_key: str,
         model: str = DEFAULT_MODEL,
         base_url: str = DEFAULT_BASE_URL,
-        timeout_s: float = 90.0,
-        max_tokens: int = 4096,
+        timeout_s: float = 120.0,
+        max_tokens: int = 8192,
     ) -> None:
         super().__init__(
             base_url=base_url,

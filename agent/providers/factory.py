@@ -53,8 +53,8 @@ def create_provider(env: Mapping[str, str] | None = None) -> LLMProvider:
             api_key=meta_key,
             model=values.get("META_MODEL") or META_DEFAULT_MODEL,
             base_url=values.get("META_BASE_URL") or META_DEFAULT_BASE_URL,
-            timeout_s=_float_env(values, "LLM_TIMEOUT_SECONDS", 90.0),
-            max_tokens=_int_env(values, "LLM_MAX_TOKENS", 4096),
+            timeout_s=_float_env(values, "LLM_TIMEOUT_SECONDS", 120.0),
+            max_tokens=_int_env(values, "LLM_MAX_TOKENS", 8192),
         )
 
     if requested == "openrouter":
@@ -64,8 +64,8 @@ def create_provider(env: Mapping[str, str] | None = None) -> LLMProvider:
             api_key=openrouter_key,
             model=values.get("OPENROUTER_MODEL") or OPENROUTER_DEFAULT_MODEL,
             base_url=values.get("OPENROUTER_BASE_URL") or OPENROUTER_DEFAULT_BASE_URL,
-            timeout_s=_float_env(values, "LLM_TIMEOUT_SECONDS", 90.0),
-            max_tokens=_int_env(values, "LLM_MAX_TOKENS", 4096),
+            timeout_s=_float_env(values, "LLM_TIMEOUT_SECONDS", 120.0),
+            max_tokens=_int_env(values, "LLM_MAX_TOKENS", 8192),
         )
 
     return FakeProvider()
