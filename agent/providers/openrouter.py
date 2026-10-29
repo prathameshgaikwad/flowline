@@ -3,7 +3,7 @@ from __future__ import annotations
 from agent.providers.chat_completions import ChatCompletionsProvider
 
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
+DEFAULT_MODEL = "meta/muse-spark-1.3"
 
 
 class OpenRouterProvider(ChatCompletionsProvider):
@@ -14,7 +14,7 @@ class OpenRouterProvider(ChatCompletionsProvider):
         model: str = DEFAULT_MODEL,
         base_url: str = DEFAULT_BASE_URL,
         timeout_s: float = 120.0,
-        max_tokens: int = 8192,
+        max_tokens: int = 4096,
         app_title: str = "Flowline",
     ) -> None:
         super().__init__(

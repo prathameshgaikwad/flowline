@@ -24,12 +24,13 @@ def main() -> int:
         )
         page.goto("http://127.0.0.1:8000", wait_until="networkidle")
         page.wait_for_selector("#project-summary:not(.hidden)", timeout=15000)
-        assert "Fake" in page.locator("#provider-badge").inner_text()
+        badge = page.locator("#provider-badge").inner_text()
+        assert any(name in badge for name in ("Fake", "OpenRouter", "Meta")), badge
         assert page.locator(".room-card").count() >= 3
         page.screenshot(path=str(OUT / "ui-plan.png"), full_page=True)
 
         page.locator("#design-button").click()
-        page.wait_for_selector("#approve-button:not([disabled])", timeout=45000)
+        page.wait_for_selector("#approve-button:not([disabled])", timeout=180000)
         page.wait_for_selector("#final-answer:not(.hidden)", timeout=15000)
         counts = page.locator("#counts").inner_text()
         assert "0 error" in counts, counts

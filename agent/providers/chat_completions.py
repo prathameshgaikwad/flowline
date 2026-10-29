@@ -21,7 +21,7 @@ class ChatCompletionsProvider(LLMProvider):
         name: str,
         headers: dict[str, str] | None = None,
         timeout_s: float = 120.0,
-        max_tokens: int = 8192,
+        max_tokens: int = 4096,
         retry_delays: tuple[float, ...] = (0.5, 1.0, 2.0),
     ) -> None:
         if not api_key:

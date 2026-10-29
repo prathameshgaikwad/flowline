@@ -498,7 +498,7 @@ function renderFinalAnswer() {
     box.classList.add("hidden");
     return;
   }
-  box.textContent = state.finalAnswer;
+  box.textContent = cleanText(state.finalAnswer);
   box.classList.remove("hidden");
 }
 
@@ -574,7 +574,7 @@ function addTrace(tool, detail, failed = false) {
   trace.querySelector(".trace-empty")?.remove();
   const row = document.createElement("div");
   row.className = "trace-row" + (failed ? " fail" : "");
-  row.innerHTML = `<span class="tool">${escapeHtml(tool)}</span><span class="detail">${escapeHtml(detail || "")}</span>`;
+  row.innerHTML = `<span class="tool">${escapeHtml(tool)}</span><span class="detail">${escapeHtml(cleanText(detail || ""))}</span>`;
   trace.appendChild(row);
   state.traceCount += 1;
   while (trace.children.length > 40) trace.firstElementChild.remove();
@@ -664,6 +664,13 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function cleanText(value) {
+  return String(value ?? "")
+    .replaceAll("**", "")
+    .replaceAll("`", "")
+    .replaceAll("__", "");
 }
 
 function truncate(value, length) {

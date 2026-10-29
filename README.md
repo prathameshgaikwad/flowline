@@ -59,11 +59,11 @@ Open <http://127.0.0.1:8000>. The app auto-loads a sample apartment. Upload your
 ```text
 LLM_PROVIDER=auto (default)
   META_API_KEY or MODEL_API_KEY -> Meta Model API (muse-spark-1.3)
-  OPENROUTER_API_KEY            -> OpenRouter
+  OPENROUTER_API_KEY            -> OpenRouter, default model meta/muse-spark-1.3
   otherwise                     -> FakeProvider (offline scripted agent)
 ```
 
-Explicit `LLM_PROVIDER=meta|openrouter|fake` overrides auto. An explicit provider without its key fails fast. Keys are never logged or committed.
+Explicit `LLM_PROVIDER=meta|openrouter|fake` overrides auto. An explicit provider without its key fails fast. Keys are never logged or committed. The OpenRouter fallback is configured to run the same Meta Muse Spark 1.3 model, so the hackathon demo still uses a Meta model if first-party credits are not available; the screenshot shows that path.
 
 ## Architecture
 
@@ -154,7 +154,7 @@ docs/             design, standards, demo script, AutoCAD notes, plan
 - New public repo; first commit on 2026-10-29, during the event. The older private POC is not a dependency.
 - 3-minute demo script: [docs/demo-script.md](docs/demo-script.md).
 - Design: [docs/design.md](docs/design.md). AutoCAD: [docs/autocad.md](docs/autocad.md).
-- Meta Model API is the primary provider; OpenRouter is a development fallback; the fake provider is for tests and offline demos.
+- Meta Model API is the primary provider. OpenRouter is the fallback and runs `meta/muse-spark-1.3` by default. The fake provider is for tests and offline demos.
 
 ## License
 

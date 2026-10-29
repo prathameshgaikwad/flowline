@@ -29,7 +29,7 @@ Small MEP consultancies and design-build contractors redraw the same bathroom dr
 - **Muse Spark 1.3** through Meta Model API, OpenAI-compatible Chat Completions with function tools.
 - The model runs a multi-step loop: inspect → list layouts → select → route → validate → fix → validate → explain.
 - The model is restricted to the tool surface. It does not invent dimensions, sizes, slopes, or rule values.
-- Provider strategy: Meta if `META_API_KEY`/`MODEL_API_KEY` is set; OpenRouter for development; a deterministic fake provider for offline tests and demos.
+- Provider strategy: first-party Meta Model API if `META_API_KEY`/`MODEL_API_KEY` is set; otherwise OpenRouter with `OPENROUTER_MODEL=meta/muse-spark-1.3`, which is the same Meta model; a deterministic fake provider for offline tests and demos.
 - The live trace and audit log show the provider, model, tool, input, result, and duration.
 
 ## Why it works
