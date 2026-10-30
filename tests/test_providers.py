@@ -25,10 +25,12 @@ class FakeHttpResponse:
         return False
 
 
-def _response_body(content="hello", tool_calls=None):
+def _response_body(content="hello", tool_calls=None, reasoning=None):
     message = {"role": "assistant", "content": content}
     if tool_calls is not None:
         message["tool_calls"] = tool_calls
+    if reasoning is not None:
+        message["reasoning_content"] = reasoning
     return {"model": "muse-spark-1.3", "choices": [{"message": message}]}
 
 
@@ -112,6 +114,18 @@ def test_parses_tool_calls(monkeypatch):
     assert result.tool_calls[0].name == "inspect_plan"
     assert result.tool_calls[0].arguments == {"room_id": "R1"}
     assert result.content is None
+
+
+def test_parses_provider_reasoning(monkeypatch):
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda request, timeout=0: FakeHttpResponse(
+            _response_body("done", reasoning="I should compare the layouts first.")
+        ),
+    )
+    provider = OpenCodeProvider(api_key="k", plan="go")
+    result = provider.chat([ChatMessage(role="user", content="hi")])
+    assert result.reasoning == "I should compare the layouts first."
 
 
 def test_http_error_is_wrapped(monkeypatch):

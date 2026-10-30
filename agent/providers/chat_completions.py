@@ -165,6 +165,7 @@ class ChatCompletionsProvider(LLMProvider):
             model=str(body.get("model") or self._model),
             provider=self.name,
             usage=body.get("usage"),
+            reasoning=_reasoning_text(message),
         )
 
     def chat(
@@ -174,6 +175,29 @@ class ChatCompletionsProvider(LLMProvider):
         tool_choice: str | dict | None = None,
     ) -> LLMResponse:
         return self._parse(self._post(self._payload(messages, tools, tool_choice)))
+
+
+def _reasoning_text(message: dict[str, Any]) -> str | None:
+    raw = (
+        message.get("reasoning_content")
+        or message.get("reasoning")
+        or message.get("thinking")
+    )
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        return raw.strip() or None
+    if isinstance(raw, list):
+        parts: list[str] = []
+        for item in raw:
+            if isinstance(item, dict):
+                text = item.get("text") or item.get("content") or ""
+                parts.append(str(text))
+            else:
+                parts.append(str(item))
+        joined = "\n".join(part for part in parts if part).strip()
+        return joined or None
+    return str(raw).strip() or None
 
 
 def _safe_read(error: urllib.error.HTTPError) -> str:

@@ -12,6 +12,16 @@ from agent.tools import TOOLS, AgentSession, ToolError, tool_schemas
 
 EventCallback = Callable[[dict], None]
 
+TOOL_STEP = {
+    "inspect_plan": "inspect",
+    "list_layout_options": "layouts",
+    "select_layout": "select",
+    "route_drainage": "route",
+    "validate_design": "validate",
+    "apply_fix": "fix",
+    "explain_design": "explain",
+}
+
 
 class AgentResult:
     def __init__(
@@ -49,13 +59,41 @@ class AgentRunner:
         session: AgentSession,
         request_id: str | None = None,
     ) -> AgentResult:
+        return self.run_turn(request, session, history=None, request_id=request_id)
+
+    def run_turn(
+        self,
+        request: str,
+        session: AgentSession,
+        *,
+        history: list[ChatMessage] | None = None,
+        request_id: str | None = None,
+    ) -> AgentResult:
         request_id = request_id or uuid.uuid4().hex[:8]
-        history: list[dict] = []
+        tool_history: list[dict] = []
+        conversation = [
+            message
+            for message in (history or [])
+            if message.role in ("user", "assistant") and (message.content or "").strip()
+        ]
         messages = [
-            ChatMessage(role="system", content=SYSTEM_PROMPT + "\n\n" + build_context(session)),
+            ChatMessage(
+                role="system",
+                content=SYSTEM_PROMPT + "\n\n" + build_context(session),
+            ),
+            *conversation[-12:],
             ChatMessage(role="user", content=request),
         ]
-        self._emit({"type": "status", "message": "Agent started.", "request_id": request_id})
+        session.ensure_plan()
+        self._emit(
+            {
+                "type": "turn_start",
+                "request": request,
+                "request_id": request_id,
+                "plan": session.plan,
+            }
+        )
+        self._emit({"type": "plan", "steps": session.plan})
 
         last_key: str | None = None
         repeat_count = 0
@@ -68,7 +106,7 @@ class AgentRunner:
                 return self._finish(
                     f"Stopped: provider error: {exc}",
                     iterations,
-                    history,
+                    tool_history,
                     "error",
                     session,
                     request_id,
@@ -77,16 +115,27 @@ class AgentRunner:
                 return self._finish(
                     f"Stopped: unexpected provider error ({type(exc).__name__}).",
                     iterations,
-                    history,
+                    tool_history,
                     "error",
                     session,
                     request_id,
                 )
 
+            if response.reasoning:
+                self._emit(
+                    {
+                        "type": "reasoning",
+                        "content": response.reasoning,
+                        "iteration": iterations,
+                        "model": response.model,
+                        "provider": response.provider,
+                    }
+                )
             self._emit(
                 {
                     "type": "assistant",
                     "content": response.content,
+                    "reasoning": response.reasoning,
                     "tool_calls": [
                         {"id": call.id, "name": call.name, "arguments": call.arguments}
                         for call in response.tool_calls
@@ -103,12 +152,17 @@ class AgentRunner:
                     return self._finish(
                         "Stopped: model returned no content and no tool calls.",
                         iterations,
-                        history,
+                        tool_history,
                         "error",
                         session,
                         request_id,
                     )
-                return self._finish(answer, iterations, history, "final", session, request_id)
+                if session.design is not None:
+                    session.update_plan("explain", "done")
+                    self._emit({"type": "plan", "steps": session.plan})
+                return self._finish(
+                    answer, iterations, tool_history, "final", session, request_id
+                )
 
             messages.append(
                 ChatMessage(
@@ -125,7 +179,7 @@ class AgentRunner:
                     return self._finish(
                         f"Stopped: repeated {call.name} with identical arguments.",
                         iterations,
-                        history,
+                        tool_history,
                         "loop",
                         session,
                         request_id,
@@ -138,10 +192,15 @@ class AgentRunner:
                         "iteration": iterations,
                     }
                 )
+                before_decisions = len(session.decisions)
                 start = time.perf_counter()
                 success, output = self._execute(call.name, call.arguments, session)
                 duration_ms = (time.perf_counter() - start) * 1000.0
-                history.append(
+                self._update_plan(session, call.name, output, success)
+                for decision in session.decisions[before_decisions:]:
+                    self._emit({"type": "decision", "decision": decision})
+                self._emit({"type": "plan", "steps": session.plan})
+                tool_history.append(
                     {
                         "tool": call.name,
                         "input": call.arguments,
@@ -181,11 +240,42 @@ class AgentRunner:
         return self._finish(
             f"Stopped: reached the {self.max_iterations}-tool-call limit.",
             iterations,
-            history,
+            tool_history,
             "max_iterations",
             session,
             request_id,
         )
+
+    def _update_plan(
+        self, session: AgentSession, tool: str, output: dict, success: bool
+    ) -> None:
+        if tool == "set_fixtures":
+            session.ensure_plan(reset=True)
+            return
+        step = TOOL_STEP.get(tool)
+        if step is None:
+            return
+        if not success:
+            session.update_plan(step, "error")
+            return
+        session.update_plan(step, "done")
+        if tool == "validate_design":
+            counts = output.get("counts") or {}
+            if counts.get("ERROR", 0) == 0:
+                if output.get("fixes"):
+                    session.update_plan("fix", "pending")
+                elif session.applied_fixes:
+                    session.update_plan("fix", "done")
+                else:
+                    session.update_plan("fix", "skipped")
+            else:
+                session.update_plan("fix", "pending")
+        elif tool == "list_layout_options":
+            session.update_plan("select", "pending")
+            session.update_plan("route", "pending")
+            session.update_plan("validate", "pending")
+            session.update_plan("fix", "pending")
+            session.update_plan("explain", "pending")
 
     def _execute(self, name: str, arguments: dict, session: AgentSession) -> tuple[bool, dict]:
         tool = TOOLS.get(name)
@@ -202,11 +292,16 @@ class AgentRunner:
         self,
         answer: str,
         iterations: int,
-        history: list[dict],
+        tool_history: list[dict],
         reason: str,
         session: AgentSession,
         request_id: str,
     ) -> AgentResult:
+        if session.design is not None and session.plan:
+            for step in session.plan:
+                if step.get("id") == "explain" and step.get("status") == "pending":
+                    step["status"] = "done"
+            self._emit({"type": "plan", "steps": session.plan})
         self._emit(
             {
                 "type": "final",
@@ -222,7 +317,7 @@ class AgentRunner:
             provider=self.provider.name,
             model=self.provider.model,
         )
-        return AgentResult(answer, iterations, history, reason, session)
+        return AgentResult(answer, iterations, tool_history, reason, session)
 
     def _emit(self, event: dict) -> None:
         if self.on_event is None:

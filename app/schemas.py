@@ -22,5 +22,13 @@ class FixRequest(BaseModel):
     fix_id: str
 
 
+class MessageRequest(BaseModel):
+    content: str
+
+
+class ProfileRequest(BaseModel):
+    profile_id: str
+
+
 class ApproveRequest(BaseModel):
     approver_name: str = "Engineer"

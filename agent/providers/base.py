@@ -36,6 +36,7 @@ class LLMResponse:
     model: str
     provider: str
     usage: dict[str, Any] | None = None
+    reasoning: str | None = None
 
 
 class LLMProvider(ABC):

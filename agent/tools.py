@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,9 +47,36 @@ class AgentSession:
     provider_name: str = ""
     model_name: str = ""
     final_answer: str = ""
+    design_id: str = ""
+    project_id: str = ""
+    decisions: list[dict] = field(default_factory=list)
+    plan: list[dict] = field(default_factory=list)
+    stale: bool = False
 
     def profile(self) -> RuleProfile:
         return load_profile(self.profile_id)
+
+    def add_decision(self, decision_type: str, **payload) -> None:
+        self.decisions.append({"kind": decision_type, "at": time.time(), **payload})
+
+    def ensure_plan(self, reset: bool = False) -> None:
+        if self.plan and not reset:
+            return
+        self.plan = [
+            {"id": "inspect", "label": "Inspect drawing", "status": "pending"},
+            {"id": "layouts", "label": "Generate layouts", "status": "pending"},
+            {"id": "select", "label": "Compare & select", "status": "pending"},
+            {"id": "route", "label": "Route drainage", "status": "pending"},
+            {"id": "validate", "label": "Validate", "status": "pending"},
+            {"id": "fix", "label": "Fix (if needed)", "status": "pending"},
+            {"id": "explain", "label": "Explain decisions", "status": "pending"},
+        ]
+
+    def update_plan(self, step_id: str, status: str) -> None:
+        for step in self.plan:
+            if step.get("id") == step_id:
+                step["status"] = status
+                return
 
     def require_design(self) -> Design:
         if self.design is None:
@@ -213,6 +241,7 @@ def _select_layout(arguments: dict, session: AgentSession) -> dict:
     if not rationale:
         raise ToolError("rationale is required: explain why this layout was selected.")
     session.design = Design(
+        id=session.design_id or "DESIGN-01",
         room_id=session.room_id or "",
         profile_id=session.profile_id,
         stack=stack,
@@ -228,6 +257,26 @@ def _select_layout(arguments: dict, session: AgentSession) -> dict:
     session.validation = []
     session.fixes = []
     session.applied_fixes = []
+    selected_score = candidate.score
+    rejected = [
+        {
+            "id": other.id,
+            "pattern": other.pattern,
+            "score": round(other.score, 1),
+            "violations": other.violations,
+            "reason": _rejection_reason(other, candidate),
+        }
+        for other in session.candidates
+        if other.id != candidate.id
+    ]
+    session.add_decision(
+        "layout_selected",
+        candidate_id=candidate.id,
+        pattern=candidate.pattern,
+        score=round(selected_score, 1),
+        rationale=rationale,
+        rejected=rejected,
+    )
     return {
         "design_id": session.design.id,
         "layout_id": candidate.id,
@@ -238,6 +287,7 @@ def _select_layout(arguments: dict, session: AgentSession) -> dict:
         ],
         "layout_violations": candidate.violations,
         "rationale": rationale,
+        "rejected": rejected,
     }
 
 
@@ -246,6 +296,11 @@ def _route_drainage(arguments: dict, session: AgentSession) -> dict:
     try:
         pipes = route_design(session.building, design, session.profile())
     except RouteError as exc:
+        session.add_decision(
+            "route_failed",
+            layout_id=design.layout_id,
+            message=str(exc),
+        )
         raise ToolError(
             f"{exc} Try list_layout_options and select another candidate."
         ) from exc
@@ -276,8 +331,15 @@ def _validate_design(arguments: dict, session: AgentSession) -> dict:
             load_profile(str(requested_profile))
         except KeyError as exc:
             raise ToolError(str(exc)) from exc
+        previous_profile = session.profile_id
         session.profile_id = str(requested_profile)
         design.profile_id = session.profile_id
+        session.add_decision(
+            "profile_changed",
+            previous_profile=previous_profile,
+            profile_id=session.profile_id,
+            reason="Requested validation against another standard.",
+        )
     profile = session.profile()
     results = validate_design(session.building, design, profile)
     fixes = recommend_fixes(
@@ -285,7 +347,13 @@ def _validate_design(arguments: dict, session: AgentSession) -> dict:
     )
     session.validation = results
     session.fixes = fixes
+    session.stale = False
     counts = summarize(results)
+    session.add_decision(
+        "validation",
+        profile_id=profile.id,
+        counts=counts,
+    )
     issues = [
         _result_payload(result)
         for result in results
@@ -333,6 +401,11 @@ def _apply_fix(arguments: dict, session: AgentSession) -> dict:
         )
     except FixError as exc:
         raise ToolError(str(exc)) from exc
+    before = summarize(session.validation) if session.validation else {
+        "PASS": 0,
+        "WARNING": 0,
+        "ERROR": 0,
+    }
     session.design = updated
     session.applied_fixes.append(fix.id)
     results = validate_design(session.building, updated, session.profile())
@@ -342,6 +415,14 @@ def _apply_fix(arguments: dict, session: AgentSession) -> dict:
     session.validation = results
     session.fixes = fixes
     counts = summarize(results)
+    session.add_decision(
+        "fix_applied",
+        fix_id=fix.id,
+        kind=fix.kind,
+        description=fix.description,
+        before=before,
+        after=counts,
+    )
     return {
         "applied": fix.id,
         "description": fix.description,
@@ -354,6 +435,166 @@ def _apply_fix(arguments: dict, session: AgentSession) -> dict:
         "fixes": [
             {"id": item.id, "kind": item.kind, "description": item.description}
             for item in fixes
+        ],
+    }
+
+
+def _get_design_state(arguments: dict, session: AgentSession) -> dict:
+    selected_id = session.design.layout_id if session.design else None
+    counts = summarize(session.validation) if session.validation else {
+        "PASS": 0,
+        "WARNING": 0,
+        "ERROR": 0,
+    }
+    design = None
+    if session.design is not None:
+        design = {
+            "layout_id": session.design.layout_id,
+            "rationale": session.design.rationale,
+            "fixtures": [
+                {
+                    "id": fixture.id,
+                    "type": fixture.type.value,
+                    "x": round(fixture.position.x, 1),
+                    "y": round(fixture.position.y, 1),
+                }
+                for fixture in session.design.fixtures
+            ],
+            "pipes": [
+                {
+                    "id": pipe.id,
+                    "from_node": pipe.from_node,
+                    "to_node": pipe.to_node,
+                    "system": pipe.system.value,
+                    "diameter_mm": pipe.diameter_mm,
+                    "slope": pipe.slope,
+                    "length_mm": round(_length(pipe.points), 1),
+                }
+                for pipe in session.design.pipes
+            ],
+        }
+    return {
+        "room_id": session.room_id,
+        "profile_id": session.profile_id,
+        "profile_name": session.profile().name,
+        "fixtures": [fixture.value for fixture in session.fixture_types],
+        "stack": (
+            {
+                "id": session.stack.id,
+                "x": session.stack.position.x,
+                "y": session.stack.position.y,
+            }
+            if session.stack
+            else None
+        ),
+        "design": design,
+        "candidates": [
+            _candidate_compact(candidate, selected_id)
+            for candidate in session.candidates
+        ],
+        "validation": {
+            "counts": counts,
+            "issues": [
+                _result_payload(result)
+                for result in session.validation
+                if result.severity != Severity.PASS
+            ],
+        },
+        "fixes": [
+            {"id": fix.id, "kind": fix.kind, "description": fix.description}
+            for fix in session.fixes
+        ],
+        "decisions": session.decisions,
+        "plan": session.plan,
+        "stale": session.stale,
+        "disclaimer": session.profile().disclaimer,
+    }
+
+
+def _compare_layouts(arguments: dict, session: AgentSession) -> dict:
+    if not session.candidates:
+        raise ToolError("No layouts generated yet. Call list_layout_options first.")
+    selected = (
+        next(
+            (
+                candidate
+                for candidate in session.candidates
+                if session.design and candidate.id == session.design.layout_id
+            ),
+            None,
+        )
+        if session.design
+        else None
+    )
+    rows = []
+    for candidate in session.candidates:
+        row = _candidate_compact(candidate, selected.id if selected else None)
+        if selected is not None and candidate.id != selected.id:
+            row["reason"] = _rejection_reason(candidate, selected)
+        elif selected is not None:
+            row["reason"] = "Selected: " + (session.design.rationale or "no rationale")
+        else:
+            row["reason"] = "Not selected yet."
+        rows.append(row)
+    return {
+        "selected_id": selected.id if selected else None,
+        "selected_pattern": selected.pattern if selected else None,
+        "selected_rationale": session.design.rationale if session.design else None,
+        "candidates": rows,
+        "note": (
+            "Reasons use hard layout violations and the deterministic score. "
+            "Candidates are not re-routed or revalidated unless explicitly requested."
+        ),
+    }
+
+
+def _set_fixtures(arguments: dict, session: AgentSession) -> dict:
+    raw = arguments.get("fixtures")
+    if not isinstance(raw, list) or not raw:
+        raise ToolError("fixtures must be a non-empty array of fixture types.")
+    try:
+        fixture_types = [FixtureType(str(item)) for item in raw]
+    except ValueError as exc:
+        raise ToolError(f"Unknown fixture type in {raw!r}.") from exc
+    fixture_types = list(dict.fromkeys(fixture_types))
+    previous = [fixture.value for fixture in session.fixture_types]
+    session.fixture_types = fixture_types
+    session.candidates = []
+    session.design = None
+    session.validation = []
+    session.fixes = []
+    session.applied_fixes = []
+    session.stale = True
+    session.ensure_plan(reset=True)
+    session.add_decision(
+        "fixtures_changed",
+        previous=previous,
+        fixtures=[fixture.value for fixture in fixture_types],
+    )
+    return {
+        "fixtures": [fixture.value for fixture in fixture_types],
+        "note": "Call list_layout_options to regenerate the layout candidates.",
+    }
+
+
+def _candidate_compact(
+    candidate: LayoutCandidate, selected_id: str | None
+) -> dict:
+    return {
+        "id": candidate.id,
+        "pattern": candidate.pattern,
+        "score": round(candidate.score, 1),
+        "violations": candidate.violations,
+        "rationale_hint": candidate.rationale_hint,
+        "selected": candidate.id == selected_id,
+        "fixtures": [
+            {
+                "id": fixture.id,
+                "type": fixture.type.value,
+                "x": round(fixture.position.x, 1),
+                "y": round(fixture.position.y, 1),
+            }
+            for fixture in candidate.fixtures
         ],
     }
 
@@ -427,6 +668,17 @@ def _result_payload(result: ValidationResult) -> dict:
         "affected": result.affected,
         "fix_ids": result.fix_ids,
     }
+
+
+def _rejection_reason(candidate: LayoutCandidate, selected: LayoutCandidate) -> str:
+    if candidate.violations:
+        return "Hard violations: " + "; ".join(candidate.violations)
+    if candidate.id != selected.id:
+        return (
+            f"Lower deterministic score ({candidate.score:.0f} vs "
+            f"{selected.score:.0f}) with no hard violation."
+        )
+    return "Not selected."
 
 
 def _length(points) -> float:
@@ -521,6 +773,45 @@ _register(
         "and the rule-pack disclaimer.",
         _schema({}),
         _explain_design,
+    )
+)
+_register(
+    Tool(
+        "get_design_state",
+        "Return the current design state: room, standard, fixtures, pipes, "
+        "candidates, validation counts, fixes, decisions, and plan. Use this "
+        "for follow-up questions.",
+        _schema({}),
+        _get_design_state,
+    )
+)
+_register(
+    Tool(
+        "compare_layouts",
+        "Compare all generated layouts against the selected one, including "
+        "deterministic rejection reasons.",
+        _schema({}),
+        _compare_layouts,
+    )
+)
+_register(
+    Tool(
+        "set_fixtures",
+        "Change the fixture set and clear the current design so the agent can "
+        "generate new layouts. Does not place fixtures manually.",
+        _schema(
+            {
+                "fixtures": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [item.value for item in FixtureType],
+                    },
+                }
+            },
+            ["fixtures"],
+        ),
+        _set_fixtures,
     )
 )
 _register(
