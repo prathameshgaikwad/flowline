@@ -221,6 +221,7 @@ class FakeProvider(LLMProvider):
             tool_calls=[ToolCall(id=f"fake-{self._seq}", name=name, arguments=arguments)],
             model=self.model,
             provider=self.name,
+            reasoning=f"Scripted step: call {name}.",
         )
 
     def _final(self, content: str) -> LLMResponse:
@@ -229,4 +230,5 @@ class FakeProvider(LLMProvider):
             tool_calls=[],
             model=self.model,
             provider=self.name,
+            reasoning="Scripted step: summarize the result and stop.",
         )

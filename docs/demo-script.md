@@ -1,70 +1,51 @@
-# Flowline 3-minute demo script
+# Flowline demo script
 
-**Primary judging artifact.** One journey: a real floor plan to a reviewed, validated DXF. Show the product working, not slides. The live run must use Meta Model API (`muse-spark-1.3`); the fake provider is only the offline fallback.
+**Primary judging artifact.** One journey: a DXF floor plan to a reviewed, validated DXF. Show the product working, not slides. The live run must use a Meta model (`muse-spark-1.3` or `muse-spark-1.3-contributor`).
 
 ## Pre-flight
 
-1. `.env` contains `META_API_KEY=...` (preferred), `OPENCODE_PLAN=go` with the Go key (or `OPENCODE_CLI_AUTH=true`), or `OPENROUTER_API_KEY=...` with `OPENROUTER_MODEL=meta/muse-spark-1.3`; `python scripts/check_provider.py` prints the provider, a Muse Spark model, and `PASS`. For Go, `OPENCODE_MODEL=muse-spark-1.3-contributor` requires the Console privacy toggle; `glm-5.3-flash` works without it but is not a Meta model.
-2. `python scripts/make_sample_plan.py` has generated both samples.
-3. `python -m uvicorn app.main:app --reload` is running; the browser is at `http://127.0.0.1:8000`.
-4. The provider badge shows the Meta model: **Meta · muse-spark-1.3**, **OpenCode · muse-spark-1.3**, or **OpenRouter · meta/muse-spark-1.3**. The profile is **India - NBC 2016 / IS 1742 (POC)**.
-5. Close other tabs. Zoom the browser to a readable size. Hide the bookmarks bar.
-6. Have `out/ui-design.png` and `out/DESIGN-01.dxf` ready as backup artifacts.
+1. `frontend` is built (`npm run build`); `python -m uvicorn app.main:app --reload` is running.
+2. `.env` has a working provider. Current demo: `OPENCODE_PLAN=go`, `OPENCODE_CLI_AUTH=true`, `OPENCODE_MODEL=muse-spark-1.3-contributor`.
+3. `python scripts/check_provider.py` prints the provider, a Muse Spark model, and `PASS`.
+4. Fresh workspace data is fine; the app auto-loads the sample if none exists.
+5. Browser at `http://127.0.0.1:8000`, 1600×1000, 100% zoom.
+6. Have the exported DXF ready to open in AutoCAD 2024.
 
-## Screen cut already recorded
-
-`out/demo.mp4` (also `out/demo.webm`) is a 32-second silent screen capture of the Meta Muse Spark run. It shows the plan, room selection, rule-pack switch, agent trace, validation, and approval. Use it as the visual spine and record a voiceover, or extend it with the beats below.
-
-### 32-second narration
-
-| Time | On screen | Voiceover |
-|---|---|---|
-| 0:00–0:05 | Apartment plan, bathroom selected; provider badge **OpenRouter · meta/muse-spark-1.3**. | "Small MEP teams still draft bathroom drainage by hand. Flowline starts with the plan they already have — a DXF — and a Meta Muse Spark agent." |
-| 0:05–0:10 | US → India rule-pack switch. | "Pick the wet area, the shaft, and the rule pack. The engineering rules stay deterministic and cited." |
-| 0:10–0:22 | Agent trace: inspect, layouts, select, route, validate, fix, explain. | "The agent inspects the plan, compares generated layouts, chooses one with a reason, routes each fixture, and validates. When a clearance warning appears, it applies a fix and revalidates. The model coordinates; Python owns the geometry." |
-| 0:22–0:27 | Validation panel: 54 pass, 1 warning, 0 errors. | "Every result carries its source. This is a POC rule pack, not a compliance certificate, and the UI says so." |
-| 0:27–0:32 | Approve and export; DXF layers visible. | "The engineer approves. Flowline writes the pipes, fixtures, labels, and stack onto the source DXF, ready for AutoCAD. Bathroom drainage first; water supply, venting, and Revit next." |
-
-Upload the finished video to YouTube or Loom and put the public link in `docs/submission.md`.
-
-## Extended 3-minute beats
+## Beats
 
 | Time | On screen | Narration |
 |---|---|---|
-| 0:00–0:20 | Flowline landing with the sample apartment; the plan is visible; the agent panel is idle. | "Small MEP teams still redraw the same bathroom drainage by hand. One missed clearance or slope becomes a coordination problem on site. Flowline is an agentic MEP designer for the tools they already use: AutoCAD." |
-| 0:20–0:40 | Click the BATHROOM room; the bathroom highlights; show the shaft and fixtures; switch to the US profile and back to India to show the rule-pack control. | "Upload a DXF, pick the wet area, pick the stack, and choose the rule pack. This is a 4.3-square-metre bathroom with a shaft on the right." |
-| 0:40–1:15 | Click **Design bathroom**. Show the live agent trace: inspect_plan, list_layout_options, select_layout. Point at the candidate scores and the agent's rationale. | "The agent inspects the plan, asks the deterministic engine for candidate layouts, and selects one with a reason. The model never invents a dimension. It chooses among engineered options." |
-| 1:15–1:45 | Routing and validation scroll into view. Show 54 pass, 1 warning, 0 errors; show the POC warning and its source. | "The engine routes each fixture to the stack, assigns the profile's pipe sizes and slopes, and checks every rule. Each result carries its source. This is a POC rule pack, not a compliance certificate, and the UI says so." |
-| 1:45–2:10 | Scroll to the agent trace; show the apply_fix events; point at the final layout changing from C-01 to C-02. | "The agent found a better layout after routing: it switched candidates, revalidated, and reduced the warnings. That is the agentic loop: inspect, choose, route, validate, correct." |
-| 2:10–2:35 | Click **Approve & export**; open the downloaded DXF in AutoCAD 2024 (or show the exported layers in the viewer); show `P-SOIL`, `P-WASTE`, `P-FIXTURE`. | "The engineer reviews and approves. Flowline writes the pipes, fixtures, labels, and stack onto the source DXF. It opens in ordinary AutoCAD, not AutoCAD MEP." |
-| 2:35–2:55 | Show the architecture slide or the README diagram: browser → agent → deterministic tools → DXF; provider badge. | "Muse Spark coordinates. The planner, router, rule packs, and fix engine are deterministic Python. Meta's model is doing what it is good at, while the engineering stays auditable." |
-| 2:55–3:00 | End card: Flowline, the wedge, the roadmap. | "Flowline: from floor plan to reviewed plumbing, in minutes. Bathroom drainage first, then water supply, venting, and Revit." |
+| 0:00–0:20 | Workspace setup with the sample plan, room, stack, fixtures and India standard. | "Small MEP teams still draft the same bathroom drainage by hand. Flowline starts with the DXF they already have — and a Meta Muse Spark agent." |
+| 0:20–0:40 | Click **Start design**. The chat shows the user message and the agent plan. | "Pick the wet area, stack, fixtures and standard. The agent inspects the drawing, generates layouts, and starts the design workflow." |
+| 0:40–1:15 | Scroll the chat; show agent notes, tool calls and candidate comparison. Open the **Thinking** tab. | "Every step is visible: the plan, the model's notes or reasoning, every tool call and result, and the candidate scores. The model coordinates; Python owns the geometry." |
+| 1:15–1:45 | Open the **Decisions** tab; show selected/rejected layouts, reasons, and the current design. | "The agent does not just pick a layout. It records what it rejected, why, and the rationale for the selected one. The candidate table is deterministic." |
+| 1:45–2:10 | Open **Checks**; show counts, citations, warnings and recommended fixes. | "Every validation result carries a source. This is a POC rule pack, not a compliance certificate. A fix is one click or one chat message away." |
+| 2:10–2:30 | Send a follow-up: "Why did you reject the other layouts?" The agent calls compare_layouts and answers. | "The conversation is stateful. The agent can explain its own decisions, revalidate with another standard, apply a fix, or change the fixture set." |
+| 2:30–2:50 | Approve & export; show the download link. Open the DXF in AutoCAD; show `P-SOIL`, `P-WASTE`, `P-FIXTURE`. | "The engineer approves. Flowline overlays the pipes, fixtures, labels and stack on the source DXF. It opens in ordinary AutoCAD, not AutoCAD MEP." |
+| 2:50–3:00 | Architecture/README diagram; end card. | "Chat-first, fully visible, deterministic engineering. Bathroom drainage first; projects, water supply, venting and Revit next." |
 
 ## What to emphasize
 
-- **Impact:** repetitive bathroom drainage work, AutoCAD-native, small-firm economics.
-- **Meta tooling:** multi-step tool use, structured tool results, provider strategy, live trace.
-- **Demo:** working end-to-end, not a mock; real DXF; real AutoCAD.
-- **Depth:** deterministic boundary, cited rules, fixes, audit log, tests.
+- **Impact:** repetitive bathroom drainage work for AutoCAD-native small firms.
+- **Meta tooling:** multi-step Muse Spark tool use, provider reasoning/notes, live trace.
+- **Demo:** working end-to-end; real DXF; real AutoCAD.
+- **Depth:** deterministic boundary, cited rule packs, decisions/rejections, fixes, JSON audit trail, tests.
+
+## Recording
+
+`scripts/record_demo.py` captures a silent screen walkthrough. Update it to the current UI, record with the Meta model, then add narration in editing. The video can be shorter than three minutes; completeness and clarity matter more than length.
 
 ## Backup plan
 
-If the Meta API is unavailable during recording:
+If the provider is unavailable, run with `LLM_PROVIDER=fake` and label it "offline scripted agent" in the description. Do not claim a fake run is a Meta run. The repo, architecture, and screenshots remain valid.
 
-1. Keep the Meta provider configured; show the health check failure honestly.
-2. Record the same flow with the fake provider and label it "offline scripted agent" in the video description; do not claim it is Meta.
-3. Submit the repo and the architecture; the live final round will test the real integration.
+## Checklist
 
-Do not fake a Meta run. The hackathon requires genuine Meta model use.
-
-## Filming checklist
-
-- [ ] 1920×1080 browser, 100% zoom
-- [ ] No console errors; no stale servers
-- [ ] Meta badge visible
-- [ ] Sample plan loaded
-- [ ] Agent run under 60 seconds
-- [ ] Export completed; DXF opens in AutoCAD
-- [ ] Captions or clear narration
+- [ ] Provider badge shows a Meta model
+- [ ] Setup starts with the sample plan
+- [ ] Chat shows plan, agent notes/reasoning, tools, decisions, validation
+- [ ] Follow-up question works
+- [ ] Approval produces a downloadable DXF
+- [ ] DXF opens in AutoCAD
 - [ ] Video under 3:00
-- [ ] Repo public; `.env` not committed; `out/` not committed
+- [ ] Repo public; `.env` not committed; `data/`, `out/`, `frontend/node_modules` not committed

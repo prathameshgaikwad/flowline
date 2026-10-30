@@ -3,51 +3,53 @@
 **Event:** Meta Global AI Developer Hackathon (Cerebral Valley), Oct 26 – Nov 4, 2026.
 **Track:** Indie developer.
 **Theme:** Build for Your World.
-**Project:** Flowline — agentic bathroom plumbing design for AutoCAD-native workflows.
+**Project:** Flowline — a chat-first agentic MEP workspace for bathroom plumbing.
 **Repo:** https://github.com/prathameshgaikwad/flowline
-**Video:** _add the public demo video link before submitting. `out/demo.mp4` is the 32-second silent screen cut; see `docs/demo-script.md` for the narration._
+**Video:** _add the public demo video link before submitting. See `docs/demo-script.md`._
 
 ## One-liner
 
-Flowline turns a DXF floor plan into ranked bathroom drainage layouts, routes them to a stack, validates every rule with a source, self-corrects with deterministic fixes, and exports an AutoCAD-ready DXF — with Meta Muse Spark coordinating the workflow and deterministic Python doing the engineering math.
+Flowline turns a DXF floor plan into a reviewed bathroom drainage design: a Meta Muse Spark agent inspects the plan, compares layouts, routes pipes, validates cited rules, applies deterministic fixes, and exports an AutoCAD-ready DXF — with every step, note, tool call, decision and rejected alternative visible in the workspace.
 
 ## Problem
 
-Small MEP consultancies and design-build contractors redraw the same bathroom drainage layouts by hand in AutoCAD. The work is repetitive, clearance/slope mistakes surface late in coordination, and full BIM/calculation suites are too heavy or expensive for the job. The engineer's judgment is valuable; the drafting and checking loop is not.
+Small MEP consultancies and design-build contractors redraw repetitive bathroom drainage by hand in AutoCAD. Clearance and slope mistakes surface late in coordination, and full BIM/calculation suites are too heavy or expensive for the job. The engineer's judgment matters; the drafting and checking loop should not be manual.
 
 ## Solution
 
-- Upload a DXF, select the wet area and stack, choose an India or US rule pack.
-- The deterministic engine generates ranked layout candidates.
-- The agent inspects the plan, selects a candidate with a rationale, routes each fixture to the stack, and validates the result.
-- Every validation result names a rule, measured value, required value, and source.
-- When the first layout produces warnings/errors, the agent applies a deterministic fix, revalidates, and explains the final design.
-- The engineer reviews and approves; Flowline writes the pipes, fixtures, labels, and stack onto the source DXF.
+- Upload a DXF, choose the wet area, stack, fixtures and standard.
+- The deterministic engine generates ranked layouts; the agent selects one with a rationale.
+- The chat shows the plan, provider reasoning or interim agent notes, tool calls/results, candidate scores, selected/rejected layouts, fix history, validation counts and citations.
+- Follow-ups are stateful: "why did you reject C-2?", "validate with the US standard", "apply the best fix", "remove the shower".
+- The engineer approves; Flowline overlays `P-SOIL`, `P-WASTE`, `P-FIXTURE`, `P-STACK`, `P-TEXT` and `P-ROOM` on the source DXF.
 
 ## How Meta is used
 
-- **Muse Spark 1.3** through Meta Model API, OpenAI-compatible Chat Completions with function tools.
-- The model runs a multi-step loop: inspect → list layouts → select → route → validate → fix → validate → explain.
-- The model is restricted to the tool surface. It does not invent dimensions, sizes, slopes, or rule values.
-- Provider strategy: first-party Meta Model API if `META_API_KEY`/`MODEL_API_KEY` is set; otherwise OpenCode Go with `OPENCODE_PLAN=go` and `OPENCODE_MODEL=muse-spark-1.3-contributor`, or OpenRouter with `OPENROUTER_MODEL=meta/muse-spark-1.3`. Both gateways serve the same Meta model; a deterministic fake provider covers offline tests and demos. The Go Contributor model requires the OpenCode Console privacy toggle because it trains on request data; the demo uses only synthetic plans.
-- The live trace and audit log show the provider, model, tool, input, result, and duration.
+- **Muse Spark 1.3 Contributor** through OpenCode Go (`muse-spark-1.3-contributor`), with first-party Meta Model API support when `META_API_KEY` is available.
+- Multi-turn function calling: inspect → layouts → select → route → validate → fix → explain → answer questions.
+- The model coordinates; it never invents dimensions, pipe sizes, slopes or rule outcomes.
+- Provider reasoning is captured when available; otherwise the model's interim notes are shown. The deterministic tool results remain authoritative.
+- Provider strategy: Meta > OpenCode > OpenRouter > fake offline provider.
 
-## Why it works
+## Why it stands out
 
-- **Deterministic boundary:** geometry, pipe sizes, slopes, routing, and rule outcomes are Python; the model only coordinates.
-- **Cited rule packs:** India (`NBC 2016` / `IS 1742` with IPC clearances) and US (`IPC 2021`) YAML profiles. Every result carries its source.
-- **Human gate:** export requires explicit approval; the report includes the approver, counts, warnings, assumptions, and disclaimer.
-- **CAD-native:** DXF in/out; the exported file opens in ordinary AutoCAD. Live AutoCAD handoff is a separate script.
-- **Tested:** unit, integration, API, UI smoke, and an end-to-end DXF round-trip; CI runs lint and tests.
+- **Chat-first, not a form.** The conversation is the main surface, with quick actions and a persistent mission-control panel.
+- **Full visibility.** Plan checklist, reasoning/notes, tool timeline with arguments/results, candidate comparison, decision log, validation citations.
+- **Deterministic boundary.** Geometry, pipe sizes, slopes, routing and rule checks are Python.
+- **Cited rule packs.** India (`NBC 2016` / `IS 1742` with IPC clearances) and US (`IPC 2021`) profiles, switchable per design; changing the standard marks the design stale until revalidated.
+- **Human gate.** Export requires explicit approval; errors block export.
+- **CAD-native.** DXF in/out; the exported file opens in ordinary AutoCAD.
+- **Persistent.** JSON workspaces, designs, messages, events and audit logs survive restarts.
+- **Tested.** Unit, integration, API, multi-turn chat, persistence, reasoning parsing, UI smoke and an end-to-end DXF round-trip; CI runs lint and tests.
 
 ## Rubric mapping
 
 | Criterion | Evidence |
 |---|---|
-| Impact 30% | A real, repetitive workflow for small AutoCAD-native firms; minutes instead of hand drafting; reviewable rule trail. |
-| Meta AI tooling 25% | Multi-step Muse Spark tool loop, structured tool results, live trace, provider strategy, offline fallback. |
-| Demo 25% | Working upload → agent → validation → fix → approved DXF → AutoCAD; sample plan included. |
-| Technical depth 20% | DXF parsing, unit conversion, candidate generation, A* routing, two cited rule packs, deterministic fixes, audit log, tests, CI. |
+| Impact 30% | Real repetitive workflow for small AutoCAD-native firms; reviewable rule trail. |
+| Meta AI tooling 25% | Multi-step Muse Spark tool loop, provider reasoning/notes, stateful follow-ups, provider strategy. |
+| Demo 25% | Working setup → chat → plan/reasoning → decisions/rejections → validation/fix → approve/DXF → AutoCAD. |
+| Technical depth 20% | DXF parsing, unit conversion, candidate generation, A* routing, two cited rule packs, fixes, JSON persistence, audit log, tests, CI. |
 
 ## New-work statement
 
@@ -60,23 +62,31 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy .env.example .env
-# Preferred: add META_API_KEY from Meta Model API.
-# Fallback: add OPENROUTER_API_KEY and keep OPENROUTER_MODEL=meta/muse-spark-1.3.
+# add META_API_KEY, or OpenCode Go / OpenRouter
+cd frontend
+npm install
+npm run build
+cd ..
 python scripts/check_provider.py
-python scripts/make_sample_plan.py
 python -m uvicorn app.main:app --reload
 ```
 
-Open <http://127.0.0.1:8000>. The sample apartment loads automatically.
+Open <http://127.0.0.1:8000>. The sample workspace loads automatically.
 
 ## Limitations
 
-- Drainage-only; no water supply or vent geometry.
-- Simple rectangular rooms; the layout uses the bounding box and warns otherwise.
-- Clean DXF plans; legacy polylines/xrefs need hardening.
+- No home/project grouping or project-level standards in this pass; the left rail has a per-workspace **Designs** list.
+- Standards are per design; changing one requires revalidation.
+- Drainage-only; water supply and vent geometry are not modeled.
+- Simple rectangular rooms; clean DXF plans.
 - POC rule packs, not compliance certificates.
+- JSON persistence is local and single-user.
+- No manual fixture dragging; the agent can change the fixture set and re-plan.
 - No DWG write; use AutoCAD to save the exported DXF as DWG.
 
 ## Next
 
-Water supply and venting, kitchen/multi-room, PDF/image intake with Muse vision, DWG/ODA, AutoCAD LT/.NET plugin, Revit/IFC, rule-pack authoring, and engineer sign-off workflows. The commercial wedge is small MEP firms in India/MENA first, then the UK/US.
+1. Home tab and projects with multiple drawings + project-level standards.
+2. Manual fixture editing; water supply and venting.
+3. PDF/image intake with Muse vision; DWG/ODA; AutoCAD LT/.NET plugin.
+4. Revit/IFC, rule-pack authoring, project versions, engineer sign-off, BOQ.

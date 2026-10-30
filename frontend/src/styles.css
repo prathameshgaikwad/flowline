@@ -1,0 +1,131 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --flowline-ink: #0f172a;
+  --flowline-paper: #f4f7fb;
+  --flowline-line: #e2e8f0;
+  --flowline-accent: #2563eb;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--flowline-paper);
+  color: var(--flowline-ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.plan-svg svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.plan-svg .room {
+  cursor: pointer;
+  transition: fill 120ms ease;
+}
+
+.plan-svg .room:hover {
+  fill: #eef6ff;
+}
+
+.plan-svg .room.selected {
+  fill: #dbeafe;
+  stroke: #2563eb;
+  stroke-width: 28;
+}
+
+.prose-flowline {
+  font-size: 0.875rem;
+  line-height: 1.65;
+  color: #334155;
+}
+
+.prose-flowline p {
+  margin: 0.45rem 0;
+}
+
+.prose-flowline ul,
+.prose-flowline ol {
+  margin: 0.45rem 0 0.45rem 1.1rem;
+  padding: 0;
+}
+
+.prose-flowline li {
+  margin: 0.2rem 0;
+}
+
+.prose-flowline strong {
+  color: #0f172a;
+}
+
+.prose-flowline code {
+  background: #f1f5f9;
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 0.8em;
+}
+
+.prose-flowline pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 0.8rem;
+  overflow-x: auto;
+}
+
+.prose-flowline pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.tool-json {
+  max-height: 260px;
+  overflow: auto;
+  background: #0f172a;
+  color: #cbd5e1;
+  border-radius: 10px;
+  padding: 0.75rem;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@keyframes flowline-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.28);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(37, 99, 235, 0);
+  }
+}
+
+.pulse-dot {
+  animation: flowline-pulse 1.4s infinite;
+}
