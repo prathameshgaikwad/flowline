@@ -64,7 +64,7 @@ copy .env.example .env
 # Fallback: add OPENROUTER_API_KEY and keep OPENROUTER_MODEL=meta/muse-spark-1.3.
 python scripts/check_provider.py
 python scripts/make_sample_plan.py
-uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload
 ```
 
 Open <http://127.0.0.1:8000>. The sample apartment loads automatically.

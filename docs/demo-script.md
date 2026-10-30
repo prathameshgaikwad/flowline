@@ -6,7 +6,7 @@
 
 1. `.env` contains `META_API_KEY=...` (preferred), `OPENCODE_PLAN=go` with the Go key (or `OPENCODE_CLI_AUTH=true`), or `OPENROUTER_API_KEY=...` with `OPENROUTER_MODEL=meta/muse-spark-1.3`; `python scripts/check_provider.py` prints the provider, a Muse Spark model, and `PASS`. For Go, `OPENCODE_MODEL=muse-spark-1.3-contributor` requires the Console privacy toggle; `glm-5.3-flash` works without it but is not a Meta model.
 2. `python scripts/make_sample_plan.py` has generated both samples.
-3. `uvicorn app.main:app --reload` is running; the browser is at `http://127.0.0.1:8000`.
+3. `python -m uvicorn app.main:app --reload` is running; the browser is at `http://127.0.0.1:8000`.
 4. The provider badge shows the Meta model: **Meta · muse-spark-1.3**, **OpenCode · muse-spark-1.3**, or **OpenRouter · meta/muse-spark-1.3**. The profile is **India - NBC 2016 / IS 1742 (POC)**.
 5. Close other tabs. Zoom the browser to a readable size. Hide the bookmarks bar.
 6. Have `out/ui-design.png` and `out/DESIGN-01.dxf` ready as backup artifacts.

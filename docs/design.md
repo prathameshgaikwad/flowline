@@ -139,7 +139,7 @@ Explicit `meta`, `openrouter`, or `fake` overrides auto. An explicit provider wi
 ## Interfaces
 
 - CLI: `python scripts/demo_cli.py --provider fake|meta|openrouter --sample samples/apartment.dxf`.
-- Web: `uvicorn app.main:app --reload`.
+- Web: `python -m uvicorn app.main:app --reload`.
 - Manual provider check: `python scripts/check_provider.py`.
 - Export: `out/<project>/design.dxf`, `design.json`, `preview.svg`, `audit.jsonl`.
 

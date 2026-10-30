@@ -49,7 +49,7 @@ Without a key, the offline fake provider runs the same tool workflow.
 python scripts/check_provider.py
 python scripts/make_sample_plan.py
 python scripts/demo_cli.py --provider auto --approve
-uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload
 ```
 
 Open <http://127.0.0.1:8000>. The app auto-loads a sample apartment. Upload your own DXF or switch to the tight-bathroom sample.
