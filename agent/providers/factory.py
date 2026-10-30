@@ -14,6 +14,15 @@ from agent.providers.meta import (
 from agent.providers.meta import (
     MetaProvider,
 )
+from agent.providers.opencode import (
+    DEFAULT_BASE_URL as OPENCODE_DEFAULT_BASE_URL,
+)
+from agent.providers.opencode import (
+    DEFAULT_MODEL as OPENCODE_DEFAULT_MODEL,
+)
+from agent.providers.opencode import (
+    OpenCodeProvider,
+)
 from agent.providers.openrouter import (
     DEFAULT_BASE_URL as OPENROUTER_DEFAULT_BASE_URL,
 )
@@ -24,7 +33,7 @@ from agent.providers.openrouter import (
     OpenRouterProvider,
 )
 
-VALID_PROVIDERS = {"auto", "meta", "openrouter", "fake"}
+VALID_PROVIDERS = {"auto", "meta", "opencode", "openrouter", "fake"}
 
 
 def create_provider(env: Mapping[str, str] | None = None) -> LLMProvider:
@@ -32,15 +41,18 @@ def create_provider(env: Mapping[str, str] | None = None) -> LLMProvider:
     requested = (values.get("LLM_PROVIDER") or "auto").strip().lower()
     if requested not in VALID_PROVIDERS:
         raise ConfigError(
-            f"Unknown LLM_PROVIDER={requested!r}; use auto, meta, openrouter, or fake."
+            f"Unknown LLM_PROVIDER={requested!r}; use auto, meta, opencode, openrouter, or fake."
         )
 
     meta_key = values.get("META_API_KEY") or values.get("MODEL_API_KEY") or ""
+    opencode_key = values.get("OPENCODE_API_KEY") or ""
     openrouter_key = values.get("OPENROUTER_API_KEY") or ""
 
     if requested == "auto":
         if meta_key:
             requested = "meta"
+        elif opencode_key:
+            requested = "opencode"
         elif openrouter_key:
             requested = "openrouter"
         else:
@@ -53,6 +65,17 @@ def create_provider(env: Mapping[str, str] | None = None) -> LLMProvider:
             api_key=meta_key,
             model=values.get("META_MODEL") or META_DEFAULT_MODEL,
             base_url=values.get("META_BASE_URL") or META_DEFAULT_BASE_URL,
+            timeout_s=_float_env(values, "LLM_TIMEOUT_SECONDS", 120.0),
+            max_tokens=_int_env(values, "LLM_MAX_TOKENS", 4096),
+        )
+
+    if requested == "opencode":
+        if not opencode_key:
+            raise ConfigError("OPENCODE_API_KEY is required for the OpenCode provider.")
+        return OpenCodeProvider(
+            api_key=opencode_key,
+            model=values.get("OPENCODE_MODEL") or OPENCODE_DEFAULT_MODEL,
+            base_url=values.get("OPENCODE_BASE_URL") or OPENCODE_DEFAULT_BASE_URL,
             timeout_s=_float_env(values, "LLM_TIMEOUT_SECONDS", 120.0),
             max_tokens=_int_env(values, "LLM_MAX_TOKENS", 4096),
         )

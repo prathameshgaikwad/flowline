@@ -7,6 +7,7 @@ import pytest
 from agent.providers.base import ChatMessage, LLMError
 from agent.providers.chat_completions import ChatCompletionsProvider
 from agent.providers.meta import MetaProvider
+from agent.providers.opencode import OpenCodeProvider
 from agent.providers.openrouter import OpenRouterProvider
 
 
@@ -36,6 +37,13 @@ def test_meta_defaults():
     assert provider.name == "meta"
     assert provider.model == "muse-spark-1.3"
     assert provider.base_url == "https://api.meta.ai/v1"
+
+
+def test_opencode_defaults():
+    provider = OpenCodeProvider(api_key="k")
+    assert provider.name == "opencode"
+    assert provider.model == "muse-spark-1.3"
+    assert provider.base_url == "https://opencode.ai/inference/openai/v1"
 
 
 def test_openrouter_defaults():

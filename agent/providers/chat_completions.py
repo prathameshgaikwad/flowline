@@ -87,6 +87,8 @@ class ChatCompletionsProvider(LLMProvider):
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Flowline/0.1",
         }
         headers.update(self._headers)
         return urllib.request.Request(

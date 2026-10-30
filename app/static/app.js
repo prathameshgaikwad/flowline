@@ -81,6 +81,9 @@ function setProvider(health) {
   } else if (health.provider === "meta") {
     badge.textContent = `Meta · ${health.model}`;
     badge.classList.add("good");
+  } else if (health.provider === "opencode") {
+    badge.textContent = `OpenCode · ${health.model}`;
+    badge.classList.add("good");
   } else if (health.provider === "openrouter") {
     badge.textContent = `OpenRouter · ${health.model}`;
   } else {

@@ -25,7 +25,9 @@ def main() -> int:
         page.goto("http://127.0.0.1:8000", wait_until="networkidle")
         page.wait_for_selector("#project-summary:not(.hidden)", timeout=15000)
         badge = page.locator("#provider-badge").inner_text()
-        assert any(name in badge for name in ("Fake", "OpenRouter", "Meta")), badge
+        assert any(
+            name in badge for name in ("Fake", "OpenRouter", "OpenCode", "Meta")
+        ), badge
         assert page.locator(".room-card").count() >= 3
         page.screenshot(path=str(OUT / "ui-plan.png"), full_page=True)
 

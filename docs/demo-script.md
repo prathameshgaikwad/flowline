@@ -4,10 +4,10 @@
 
 ## Pre-flight
 
-1. `.env` contains `META_API_KEY=...` (preferred) or `OPENROUTER_API_KEY=...` with `OPENROUTER_MODEL=meta/muse-spark-1.3`; `python scripts/check_provider.py` prints `provider=meta` or `provider=openrouter`, `model=muse-spark-1.3`/`meta/muse-spark-1.3`, and `PASS`.
+1. `.env` contains `META_API_KEY=...` (preferred), `OPENCODE_API_KEY=...`, or `OPENROUTER_API_KEY=...` with `OPENROUTER_MODEL=meta/muse-spark-1.3`; `python scripts/check_provider.py` prints the provider, a Muse Spark model, and `PASS`.
 2. `python scripts/make_sample_plan.py` has generated both samples.
 3. `uvicorn app.main:app --reload` is running; the browser is at `http://127.0.0.1:8000`.
-4. The provider badge shows the Meta model: **Meta · muse-spark-1.3** or **OpenRouter · meta/muse-spark-1.3**. The profile is **India - NBC 2016 / IS 1742 (POC)**.
+4. The provider badge shows the Meta model: **Meta · muse-spark-1.3**, **OpenCode · muse-spark-1.3**, or **OpenRouter · meta/muse-spark-1.3**. The profile is **India - NBC 2016 / IS 1742 (POC)**.
 5. Close other tabs. Zoom the browser to a readable size. Hide the bookmarks bar.
 6. Have `out/ui-design.png` and `out/DESIGN-01.dxf` ready as backup artifacts.
 
