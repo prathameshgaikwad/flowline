@@ -118,6 +118,19 @@ export default function App() {
     }
   }
 
+  async function refreshDesignState(id: string) {
+    try {
+      const data = await api.design(id);
+      if (!mountedRef.current) return;
+      setDesign(data);
+      if (data.provider) setProvider({ name: data.provider, model: data.model });
+      const current = await api.project(data.project_id);
+      if (mountedRef.current) setProject(current);
+    } catch {
+      // The final snapshot will correct the state if this fetch races the turn.
+    }
+  }
+
   function schedulePoll(jobId: string, designId: string) {
     if (pollRef.current) window.clearTimeout(pollRef.current);
     pollRef.current = window.setTimeout(async () => {
@@ -177,6 +190,14 @@ export default function App() {
         }
         return [...previous, event];
       });
+      if (
+        event.type === "tool_result" &&
+        ["select_layout", "route_drainage", "validate_design", "apply_fix"].includes(
+          String(event.tool),
+        )
+      ) {
+        void refreshDesignState(designId);
+      }
       if (event.type === "error") {
         setBusy(false);
         showToast(String(event.message || "Agent error."), true);

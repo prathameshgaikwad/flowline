@@ -6,7 +6,7 @@ import {
   ListChecks,
   ShieldCheck,
 } from "lucide-react";
-import type { AgentEvent, DesignState } from "../types";
+import type { AgentEvent, DesignState, PlanStep } from "../types";
 import { AgentNoteCard } from "./AgentNoteCard";
 import { DecisionList } from "./DecisionList";
 import { PlanStepper } from "./PlanStepper";
@@ -48,6 +48,14 @@ export function MissionControl({
     [events],
   );
   const decisions = design?.decisions || [];
+  const livePlan = useMemo(() => {
+    const plans = events.filter((event) => event.type === "plan");
+    return (
+      (plans[plans.length - 1]?.steps as PlanStep[] | undefined) ||
+      design?.plan ||
+      []
+    );
+  }, [events, design]);
 
   return (
     <section
@@ -81,7 +89,7 @@ export function MissionControl({
             <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
               Agent plan
             </div>
-            <PlanStepper steps={design?.plan || []} activeId={busy ? "active" : null} />
+            <PlanStepper steps={livePlan} activeId={busy ? "active" : null} />
             {design?.design && (
               <div className="mt-3 border-t border-slate-200 pt-2 text-[10px] text-slate-500">
                 Selected layout:{" "}
