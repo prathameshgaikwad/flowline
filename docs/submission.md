@@ -5,7 +5,7 @@
 **Theme:** Build for Your World.
 **Project:** Flowline — a chat-first agentic MEP workspace for bathroom plumbing.
 **Repo:** https://github.com/prathameshgaikwad/flowline
-**Video:** _add the public demo video link before submitting. See `docs/demo-script.md`._
+**Video:** _add the public demo video link before submitting._ Local silent cut: `out/demo-v2.mp4` (1:20). Narration beats are in `docs/demo-script.md`; upload the finished video to YouTube or Loom.
 
 ## One-liner
 

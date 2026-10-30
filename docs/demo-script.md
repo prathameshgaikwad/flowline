@@ -33,7 +33,7 @@
 
 ## Recording
 
-`scripts/record_demo.py` captures a silent screen walkthrough. Update it to the current UI, record with the Meta model, then add narration in editing. The video can be shorter than three minutes; completeness and clarity matter more than length.
+`scripts/record_demo.py` captures a silent screen walkthrough. A real Meta Contributor run is recorded locally as `out/demo-v2.mp4` (1:20). Add narration in editing and upload. The video can be shorter than three minutes; completeness and clarity matter more than length.
 
 ## Backup plan
 
