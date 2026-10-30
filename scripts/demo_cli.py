@@ -8,6 +8,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 import config  # noqa: E402,F401  (loads .env)
 from agent.logging import ActionLogger  # noqa: E402
 from agent.loop import AgentRunner  # noqa: E402

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
+from pathlib import Path
 
 from agent.providers.base import ConfigError, LLMProvider
 from agent.providers.fake import FakeProvider
@@ -13,12 +15,6 @@ from agent.providers.meta import (
 )
 from agent.providers.meta import (
     MetaProvider,
-)
-from agent.providers.opencode import (
-    DEFAULT_BASE_URL as OPENCODE_DEFAULT_BASE_URL,
-)
-from agent.providers.opencode import (
-    DEFAULT_MODEL as OPENCODE_DEFAULT_MODEL,
 )
 from agent.providers.opencode import (
     OpenCodeProvider,
@@ -45,7 +41,10 @@ def create_provider(env: Mapping[str, str] | None = None) -> LLMProvider:
         )
 
     meta_key = values.get("META_API_KEY") or values.get("MODEL_API_KEY") or ""
-    opencode_key = values.get("OPENCODE_API_KEY") or ""
+    opencode_plan = (values.get("OPENCODE_PLAN") or "console").strip().lower()
+    if opencode_plan not in {"console", "go"}:
+        raise ConfigError("OPENCODE_PLAN must be 'console' or 'go'.")
+    opencode_key = _opencode_key(values, opencode_plan)
     openrouter_key = values.get("OPENROUTER_API_KEY") or ""
 
     if requested == "auto":
@@ -71,11 +70,15 @@ def create_provider(env: Mapping[str, str] | None = None) -> LLMProvider:
 
     if requested == "opencode":
         if not opencode_key:
-            raise ConfigError("OPENCODE_API_KEY is required for the OpenCode provider.")
+            raise ConfigError(
+                "OPENCODE_API_KEY (or OPENCODE_CLI_AUTH=true) is required for the "
+                "OpenCode provider."
+            )
         return OpenCodeProvider(
             api_key=opencode_key,
-            model=values.get("OPENCODE_MODEL") or OPENCODE_DEFAULT_MODEL,
-            base_url=values.get("OPENCODE_BASE_URL") or OPENCODE_DEFAULT_BASE_URL,
+            model=values.get("OPENCODE_MODEL") or None,
+            base_url=values.get("OPENCODE_BASE_URL") or None,
+            plan=opencode_plan,
             timeout_s=_float_env(values, "LLM_TIMEOUT_SECONDS", 120.0),
             max_tokens=_int_env(values, "LLM_MAX_TOKENS", 4096),
         )
@@ -92,6 +95,29 @@ def create_provider(env: Mapping[str, str] | None = None) -> LLMProvider:
         )
 
     return FakeProvider()
+
+
+def _opencode_key(values: Mapping[str, str], plan: str) -> str:
+    key = values.get("OPENCODE_API_KEY") or ""
+    if key:
+        return key
+    if (values.get("OPENCODE_CLI_AUTH") or "").lower() not in ("1", "true", "yes"):
+        return ""
+    path = Path(
+        os.path.expanduser(
+            values.get("OPENCODE_AUTH_FILE")
+            or (Path.home() / ".local/share/opencode/auth.json")
+        )
+    )
+    provider = values.get("OPENCODE_AUTH_PROVIDER") or (
+        "opencode-go" if plan == "go" else "opencode"
+    )
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    entry = data.get(provider) or {}
+    return str(entry.get("key") or "")
 
 
 def _float_env(values: Mapping[str, str], key: str, default: float) -> float:

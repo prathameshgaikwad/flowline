@@ -6,6 +6,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 import config  # noqa: E402,F401  (loads .env)
 from agent.providers.base import ChatMessage, ConfigError, LLMError  # noqa: E402
 from agent.providers.factory import create_provider  # noqa: E402

@@ -29,6 +29,30 @@ def test_opencode_key_selects_opencode():
     assert provider.model == "muse-spark-1.3"
 
 
+def test_opencode_go_plan_uses_go_defaults():
+    provider = create_provider({"OPENCODE_API_KEY": "oc-key", "OPENCODE_PLAN": "go"})
+    assert isinstance(provider, OpenCodeProvider)
+    assert provider.base_url == "https://opencode.ai/inference/go/openai/v1"
+    assert provider.model == "muse-spark-1.3-contributor"
+
+
+def test_opencode_can_read_the_cli_auth_file(tmp_path):
+    auth = tmp_path / "auth.json"
+    auth.write_text(
+        '{"opencode-go": {"type": "api", "key": "go-key"}}', encoding="utf-8"
+    )
+    provider = create_provider(
+        {
+            "OPENCODE_PLAN": "go",
+            "OPENCODE_CLI_AUTH": "true",
+            "OPENCODE_AUTH_FILE": str(auth),
+            "OPENCODE_AUTH_PROVIDER": "opencode-go",
+        }
+    )
+    assert isinstance(provider, OpenCodeProvider)
+    assert provider.model == "muse-spark-1.3-contributor"
+
+
 def test_meta_wins_over_opencode_and_openrouter():
     provider = create_provider(
         {

@@ -59,12 +59,16 @@ Open <http://127.0.0.1:8000>. The app auto-loads a sample apartment. Upload your
 ```text
 LLM_PROVIDER=auto (default)
   META_API_KEY or MODEL_API_KEY -> Meta Model API (muse-spark-1.3)
-  OPENCODE_API_KEY              -> OpenCode Console / Go (muse-spark-1.3)
+  OPENCODE_API_KEY              -> OpenCode Console or Go
   OPENROUTER_API_KEY            -> OpenRouter, default model meta/muse-spark-1.3
   otherwise                     -> FakeProvider (offline scripted agent)
 ```
 
-Explicit `LLM_PROVIDER=meta|opencode|openrouter|fake` overrides auto. An explicit provider without its key fails fast. Keys are never logged or committed. Both gateways expose the Meta Muse Spark 1.3 model, so the hackathon demo still uses a Meta model when first-party credits are unavailable; the screenshot shows the OpenRouter path.
+Explicit `LLM_PROVIDER=meta|opencode|openrouter|fake` overrides auto. An explicit provider without its key fails fast. Keys are never logged or committed.
+
+**OpenCode Console vs Go:** Console and Go share a CLI credential but use different endpoints. `OPENCODE_PLAN=console` uses `https://opencode.ai/inference/openai/v1` and bills Console credits. `OPENCODE_PLAN=go` uses `https://opencode.ai/inference/go/openai/v1`, adds the required `x-opencode-session` header, and bills the Go subscription. The Go default is `muse-spark-1.3-contributor`, which requires **Console → Settings → Privacy → Allow paid endpoints that train on request data**; use only non-confidential demo data. Set `OPENCODE_MODEL=glm-5.3-flash` if you have not enabled that toggle.
+
+`OPENCODE_CLI_AUTH=true` reads the key directly from the OpenCode CLI auth file (`~/.local/share/opencode/auth.json`, provider `opencode-go` by default for the Go plan) so you do not have to copy it. If the key expires, re-run `/connect` in OpenCode or create a fresh key in Console.
 
 ## Architecture
 

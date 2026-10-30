@@ -46,6 +46,25 @@ def test_opencode_defaults():
     assert provider.base_url == "https://opencode.ai/inference/openai/v1"
 
 
+def test_opencode_go_defaults_and_session_header(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, timeout=0):
+        captured["headers"] = dict(request.headers)
+        captured["url"] = request.full_url
+        return FakeHttpResponse(_response_body("ready"))
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    provider = OpenCodeProvider(api_key="k", plan="go")
+    provider.chat([ChatMessage(role="user", content="hi")])
+
+    assert provider.base_url == "https://opencode.ai/inference/go/openai/v1"
+    assert provider.model == "muse-spark-1.3-contributor"
+    assert captured["url"].endswith("/go/openai/v1/chat/completions")
+    headers = {key.lower(): value for key, value in captured["headers"].items()}
+    assert headers.get("x-opencode-session")
+
+
 def test_openrouter_defaults():
     provider = OpenRouterProvider(api_key="k")
     assert provider.name == "openrouter"

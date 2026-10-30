@@ -29,7 +29,7 @@ Small MEP consultancies and design-build contractors redraw the same bathroom dr
 - **Muse Spark 1.3** through Meta Model API, OpenAI-compatible Chat Completions with function tools.
 - The model runs a multi-step loop: inspect → list layouts → select → route → validate → fix → validate → explain.
 - The model is restricted to the tool surface. It does not invent dimensions, sizes, slopes, or rule values.
-- Provider strategy: first-party Meta Model API if `META_API_KEY`/`MODEL_API_KEY` is set; otherwise OpenCode Console/Go with `OPENCODE_MODEL=muse-spark-1.3`, or OpenRouter with `OPENROUTER_MODEL=meta/muse-spark-1.3`. Both gateways serve the same Meta model; a deterministic fake provider covers offline tests and demos.
+- Provider strategy: first-party Meta Model API if `META_API_KEY`/`MODEL_API_KEY` is set; otherwise OpenCode Go with `OPENCODE_PLAN=go` and `OPENCODE_MODEL=muse-spark-1.3-contributor`, or OpenRouter with `OPENROUTER_MODEL=meta/muse-spark-1.3`. Both gateways serve the same Meta model; a deterministic fake provider covers offline tests and demos. The Go Contributor model requires the OpenCode Console privacy toggle because it trains on request data; the demo uses only synthetic plans.
 - The live trace and audit log show the provider, model, tool, input, result, and duration.
 
 ## Why it works
