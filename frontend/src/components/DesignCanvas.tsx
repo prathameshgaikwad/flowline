@@ -260,7 +260,7 @@ export function DesignCanvas({
         </div>
 
         <div className="pointer-events-auto absolute bottom-16 right-3 sm:bottom-3">
-          <PlanLegend design={design} defaultOpen={fullscreen} />
+          <PlanLegend design={design} project={project} defaultOpen={fullscreen} />
         </div>
       </div>
     </section>

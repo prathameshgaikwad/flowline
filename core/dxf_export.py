@@ -57,17 +57,18 @@ def export_design(
         )
 
     for fixture in design.fixtures:
-        box = fixture.bbox
-        msp.add_lwpolyline(
-            [
-                (box.minx / scale, box.miny / scale),
-                (box.maxx / scale, box.miny / scale),
-                (box.maxx / scale, box.maxy / scale),
-                (box.minx / scale, box.maxy / scale),
-            ],
-            close=True,
-            dxfattribs={"layer": "P-FIXTURE"},
-        )
+        if fixture.source != "existing":
+            box = fixture.bbox
+            msp.add_lwpolyline(
+                [
+                    (box.minx / scale, box.miny / scale),
+                    (box.maxx / scale, box.miny / scale),
+                    (box.maxx / scale, box.maxy / scale),
+                    (box.minx / scale, box.maxy / scale),
+                ],
+                close=True,
+                dxfattribs={"layer": "P-FIXTURE"},
+            )
         _text(
             msp,
             fixture.type.value,

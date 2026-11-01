@@ -78,6 +78,8 @@ inspect_plan -> plan_room_layouts -> route_drainage -> route_services -> validat
 
 Use plan_room_layouts when several plumbing rooms were selected, so one consolidated design covers every room. Use list_layout_options and select_layout with a room_id only when you need to inspect or override one room.
 
+Treat service shafts in the drawing as fixed connection points. Route drainage to the nearest DRAIN or combined shaft, take water from the nearest WATER or combined shaft, and terminate vents in the VENT or combined shaft. Do not replace a shaft connection with an arbitrary offset when a compatible shaft exists. When detected source fixtures form a valid existing layout, prefer it; if it fails clearances, say why and use a generated alternative.
+
 If the user changes the sheet size, orientation, or scale, call set_sheet_options, then prepare_sheet and review_drawing. Do not export while review_drawing reports ERRORs.
 
 If a tool fails, use the error to choose the next action. If every layout/route fails, explain the blocker and ask for a human decision.
@@ -96,10 +98,26 @@ def build_context(session: AgentSession) -> str:
         lines.append("Import warnings: " + "; ".join(building.warnings))
     lines.append("Rooms:")
     for room in building.rooms:
+        fixtures = [
+            fixture.type.value
+            for fixture in building.detected_fixtures
+            if fixture.room_id == room.id
+        ]
+        fixture_text = ", ".join(fixtures) if fixtures else "none"
         lines.append(
             f"- {room.id} {room.name or 'unnamed'}: {room.area_m2:.2f} m2, "
             f"{room.bbox.width:.0f} x {room.bbox.height:.0f} mm, "
-            f"wet_area={room.is_wet_area}"
+            f"wet_area={room.is_wet_area}, detected_fixtures={fixture_text}"
+        )
+    if building.detected_fixtures:
+        lines.append(
+            "Detected fixtures: "
+            + ", ".join(
+                f"{fixture.type.value} in {fixture.room_id or 'unassigned'} "
+                f"({fixture.width_mm:.0f}x{fixture.depth_mm:.0f} mm, "
+                f"{fixture.source}, {fixture.confidence:.2f})"
+                for fixture in building.detected_fixtures
+            )
         )
     if building.doors:
         lines.append(
@@ -114,7 +132,8 @@ def build_context(session: AgentSession) -> str:
             "Shafts: "
             + ", ".join(
                 f"{shaft.id} ({shaft.width_mm:.0f}x{shaft.depth_mm:.0f} mm at "
-                f"{shaft.position.x:.0f},{shaft.position.y:.0f})"
+                f"{shaft.position.x:.0f},{shaft.position.y:.0f}; "
+                f"services={','.join(service.value for service in shaft.services)})"
                 for shaft in building.shafts
             )
         )

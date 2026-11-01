@@ -134,6 +134,25 @@ def main() -> int:
             f"sanitaryware={room.has_sanitaryware}"
         )
 
+    print("shafts:")
+    for shaft in building.shafts:
+        services = ",".join(service.value for service in shaft.services)
+        print(
+            f"  {shaft.id}  {shaft.width_mm:.0f}x{shaft.depth_mm:.0f} mm  "
+            f"services={services}  source={shaft.source}  "
+            f"confidence={shaft.confidence:.2f}  name={shaft.name or '-'}"
+        )
+
+    print("detected_fixtures:")
+    for fixture in building.detected_fixtures:
+        print(
+            f"  {fixture.id:16} {fixture.type.value:12} "
+            f"room={fixture.room_id or '-':6} "
+            f"at=({fixture.position.x:.0f},{fixture.position.y:.0f}) "
+            f"{fixture.width_mm:.0f}x{fixture.depth_mm:.0f} mm "
+            f"source={fixture.source} confidence={fixture.confidence:.2f}"
+        )
+
     print("sanitaryware_layers:")
     for layer, count in layer_counts.items():
         if _is_sanitary_layer(layer):

@@ -22,7 +22,7 @@ Flowline turns a DXF floor plan into one reviewed floor plumbing design: it dete
 - **Any-size construction sheet.** A4–A0, ANSI A–E, or custom; plan, riser diagram, schedules, legend, notes, blocks, dimensions, and title block. A3 default; automatic continuation sheets.
 - **Sheet preview and downloads.** Live SVG sheet preview, drawing checks, and PDF/DXF downloads after approval.
 - **MEP-scoped assistant.** Requests outside the plumbing design are refused; the agent does not answer coding, math, or general trivia.
-- **Architectural DXF import.** Rooms are inferred from wall geometry when room polylines are absent; door/window gaps are bridged, annotations are cropped from the preview, and door swings render correctly. If the drawing has no shaft, place the stack directly on the plan.
+- **Architectural DXF import.** Rooms are inferred from wall geometry when room polylines are absent; WC, basin, shower, floor-drain and kitchen-sink fixtures are identified from nested blocks and shown on the plan; service shafts are detected from layers, labels or small solid hatches near wet rooms and anchor drain, water and vent connections. If the drawing has no shaft, place the stack directly on the plan.
 - **Full agent visibility.** The Details drawer holds layout options, rejected alternatives, check citations, fix history, reasoning, and the full tool log.
 - **Quick actions.** Compare layouts, run checks, apply the best fix, prepare/review the sheet, explain decisions, and export.
 - **Per-design standards.** India NBC/IS + IPC clearances or US IPC; changing the standard marks the design stale until revalidated.

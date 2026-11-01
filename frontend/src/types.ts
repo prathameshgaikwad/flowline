@@ -24,6 +24,20 @@ export type PlumbingRole =
   | "wash_area"
   | "none";
 
+export type DetectedFixture = {
+  id: string;
+  type: string;
+  room_id?: string | null;
+  x: number;
+  y: number;
+  width_mm: number;
+  depth_mm: number;
+  block_name?: string | null;
+  layer?: string;
+  source: string;
+  confidence: number;
+};
+
 export type Room = {
   id: string;
   name: string | null;
@@ -34,16 +48,21 @@ export type Room = {
   plumbing_role: PlumbingRole;
   default_fixtures: string[];
   fixture_hints: string[];
+  fixtures?: DetectedFixture[];
   default_stack_id: string | null;
   closed: boolean;
 };
 
 export type Shaft = {
   id: string;
+  name?: string | null;
   x: number;
   y: number;
   width_mm: number;
   depth_mm: number;
+  services: string[];
+  source: string;
+  confidence: number;
 };
 
 export type Stack = {
@@ -51,6 +70,14 @@ export type Stack = {
   x: number;
   y: number;
   diameter_mm: number;
+  shaft_id?: string | null;
+};
+
+export type WaterSource = {
+  id: string;
+  x: number;
+  y: number;
+  shaft_id?: string | null;
 };
 
 export type DesignSummary = {
@@ -83,6 +110,8 @@ export type Project = {
   doors: { id: string; x: number; y: number; width_mm: number }[];
   shafts: Shaft[];
   stacks: Stack[];
+  water_sources: WaterSource[];
+  detected_fixtures: DetectedFixture[];
   designs: DesignSummary[];
   svg: string;
   created_at: number;
@@ -139,6 +168,8 @@ export type Fixture = {
   room_id?: string | null;
   position: { x: number; y: number };
   rotation_deg?: number;
+  source?: string;
+  source_fixture_id?: string | null;
 };
 
 export type Pipe = {
@@ -201,6 +232,7 @@ export type RoomPlan = {
   fixture_types: string[];
   layout_id: string | null;
   stack_id: string;
+  water_source_id?: string | null;
   rationale: string | null;
 };
 
@@ -228,6 +260,7 @@ export type Design = {
     heater_capacity_l: number;
     material: string;
   } | null;
+  water_sources?: WaterSource[];
   sheet?: SheetSpec;
   rationale?: string | null;
   assumptions?: string[];
@@ -267,6 +300,7 @@ export type DesignState = {
     heater_capacity_l: number;
     material: string;
   } | null;
+  water_sources?: WaterSource[];
   sheet?: SheetSpec | null;
   drawing_review?: DrawingCheck[];
   sheet_ready?: boolean;

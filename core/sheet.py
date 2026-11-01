@@ -387,7 +387,7 @@ def _add_model_entities(doc, design: Design, source_scale: float, scale_used: fl
         _polyline(msp, pipe.points, source_scale, layer)
     for fixture in design.fixtures:
         block = BLOCK_NAMES.get(fixture.type)
-        if block:
+        if block and fixture.source != "existing":
             msp.add_blockref(
                 block,
                 insert=(fixture.position.x / source_scale, fixture.position.y / source_scale),

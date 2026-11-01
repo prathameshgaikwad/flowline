@@ -1,14 +1,16 @@
 import { useId, useState } from "react";
 import { ChevronDown, Layers3 } from "lucide-react";
-import type { DesignState } from "../types";
+import type { DesignState, Project } from "../types";
 import { cx } from "./ui";
 
 export function PlanLegend({
   design,
+  project,
   defaultOpen = false,
   className,
 }: {
   design: DesignState | null;
+  project?: Project | null;
   defaultOpen?: boolean;
   className?: string;
 }) {
@@ -21,7 +23,11 @@ export function PlanLegend({
       ...(design?.design?.supply_pipes || []),
     ].map((pipe) => String(pipe.system)),
   );
+  const shaftServices = new Set(
+    (project?.shafts || []).flatMap((shaft) => shaft.services || []),
+  );
   const hasDesign = Boolean(design?.design);
+  const hasDetectedFixtures = Boolean(project?.detected_fixtures?.length);
   return (
     <div
       className={cx(
@@ -76,6 +82,21 @@ export function PlanLegend({
               <LegendRow color="#a16207" label="Doors" />
               <LegendRow color="#0f6f8f" label="Windows" />
             </>
+          )}
+          {hasDetectedFixtures && (
+            <LegendRow color="#2563eb" label="Detected fixtures" dashed />
+          )}
+          {Boolean(project?.shafts?.length) && (
+            <LegendRow color="#4f46e5" label="Service shaft" outline />
+          )}
+          {shaftServices.has("DRAIN") && (
+            <LegendRow color="#dc2626" label="Drain outlet" />
+          )}
+          {shaftServices.has("WATER") && (
+            <LegendRow color="#2563eb" label="Water inlet" />
+          )}
+          {shaftServices.has("VENT") && (
+            <LegendRow color="#16a34a" label="Vent" dashed />
           )}
           <div className="border-t border-line pt-2 text-xs text-muted">
             All dimensions in {design ? "mm" : "drawing units"}

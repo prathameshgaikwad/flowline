@@ -9,18 +9,19 @@ from ezdxf.path import from_hatch
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.ops import unary_union
 
+from core.fixture_detect import detect_fixtures
 from core.geometry import Point, bbox, distance, polygon_area
 from core.layers import (
     LayerRole,
     classify_layer,
     is_room_label_text,
 )
-from core.models import Building, Door, DrawingEntity, FixtureType, Shaft
+from core.models import Building, Door, DrawingEntity, FixtureType, Shaft, ShaftService
 from core.plumbing_zones import fixture_hint_from_name
 from core.room_detect import detect_rooms
 from core.units import unit_scale
 
-PARSER_VERSION = 4
+PARSER_VERSION = 6
 MAX_BLOCK_DEPTH = 6
 HATCH_FLATTEN_MM = 5.0
 SANITARYWARE_TOKEN = "sanitaryware"
@@ -29,6 +30,44 @@ ROOM_BBOX_OVERLAP_LIMIT = 0.5
 MIN_FLOOR_HATCH_ROOM_M2 = 1.0
 MAX_FLOOR_HATCH_ROOM_M2 = 50.0
 WALL_FILL_ROOM_OVERLAP_LIMIT = 0.5
+MIN_SHAFT_AREA_M2 = 0.04
+MAX_SHAFT_AREA_M2 = 4.0
+MIN_SHAFT_SIDE_MM = 150.0
+MAX_SHAFT_SIDE_MM = 2500.0
+MAX_SHAFT_ASPECT = 10.0
+INFERRED_SHAFT_MAX_DISTANCE_MM = 1500.0
+EXCLUDED_SHAFT_LAYER_TOKENS = (
+    "wall",
+    "column",
+    "furniture",
+    "sanitaryware",
+    "door",
+    "window",
+    "structure",
+    "parapet",
+    "handrail",
+    "balustrade",
+    "tile",
+    "floor",
+    "louver",
+    "dimension",
+    "note",
+)
+SHAFT_TEXT_TOKENS = (
+    "shaft",
+    "duct",
+    "riser",
+    "chase",
+    "service shaft",
+    "plumbing shaft",
+    "wet shaft",
+    "mep shaft",
+)
+SHAFT_SERVICE_TOKENS: tuple[tuple[ShaftService, tuple[str, ...]], ...] = (
+    (ShaftService.DRAIN, ("soil", "waste", "drain", "outlet", "stack")),
+    (ShaftService.WATER, ("water", "supply", "inlet", "main", "cold", "hot")),
+    (ShaftService.VENT, ("vent",)),
+)
 
 
 class DxfImportError(ValueError):
@@ -52,6 +91,8 @@ def import_dxf(path: str | Path) -> Building:
     wall_fills: list[ShapelyPolygon] = []
     door_candidates: list[Door] = []
     shaft_candidates: list[Shaft] = []
+    inferred_shafts: list[tuple[Shaft, DrawingEntity]] = []
+    shaft_labels: list[tuple[str, Point]] = []
     skipped = 0
 
     for entity, skip_door in _iter_entities(msp):
@@ -61,6 +102,9 @@ def import_dxf(path: str | Path) -> Building:
                 entities.extend(hatch_items)
                 wall_fills.extend(hatch_fills)
                 floor_hatches.extend(_read_floor_hatch_polygons(entity, scale))
+                inferred, boundary = _read_shaft_hatch(entity, scale)
+                if inferred is not None and boundary is not None:
+                    inferred_shafts.append((inferred, boundary))
                 continue
             item, door, shaft = _read_entity(entity, scale, detect_door=not skip_door)
         except Exception:
@@ -68,6 +112,13 @@ def import_dxf(path: str | Path) -> Building:
             continue
         if item is not None:
             entities.append(item)
+            if (
+                item.kind == "text"
+                and item.text
+                and item.position is not None
+                and _is_shaft_label(item.text)
+            ):
+                shaft_labels.append((item.text, item.position))
         if door is not None:
             door_candidates.append(door)
         if shaft is not None:
@@ -80,6 +131,7 @@ def import_dxf(path: str | Path) -> Building:
         room_result.rooms, floor_hatches, entities
     )
     _assign_fixture_hints(room_result.rooms, entities, generic_rooms=inferred_rooms)
+    detected_fixtures = detect_fixtures(msp, scale, room_result.rooms)
     warnings = list(scale.warnings) + list(room_result.warnings)
     if skipped:
         warnings.append(f"{skipped} DXF entit{'y' if skipped == 1 else 'ies'} could not be read.")
@@ -88,7 +140,17 @@ def import_dxf(path: str | Path) -> Building:
     if not doors:
         warnings.append("No door detected. Set the door position manually.")
 
-    shafts = _dedupe_shafts(shaft_candidates)
+    wet_rooms = [room for room in room_result.rooms if room.is_wet_area]
+    kept_inferred = [
+        (shaft, boundary)
+        for shaft, boundary in inferred_shafts
+        if _shaft_is_near_wet_room(shaft, wet_rooms)
+    ]
+    entities.extend(boundary for _, boundary in kept_inferred)
+    shafts = _dedupe_shafts(
+        [*shaft_candidates, *(shaft for shaft, _ in kept_inferred)]
+    )
+    shafts = _apply_shaft_labels(shafts, shaft_labels)
     if not shafts:
         warnings.append("No shaft detected. Set the stack position manually.")
 
@@ -99,6 +161,7 @@ def import_dxf(path: str | Path) -> Building:
         rooms=room_result.rooms,
         doors=doors,
         shafts=shafts,
+        detected_fixtures=detected_fixtures,
         entities=entities,
         warnings=warnings,
     )
@@ -231,8 +294,6 @@ def _read_entity(entity, scale, *, detect_door: bool = True):
             text=raw_text,
             position=position,
         )
-        if "shaft" in raw_text.lower():
-            shaft = Shaft(id=f"S-{round(position.x)}-{round(position.y)}", position=position)
     elif kind == "INSERT":
         position = _wcs_point(entity, entity.dxf.insert, scale)
         name = str(entity.dxf.name)
@@ -391,6 +452,131 @@ def _read_floor_hatch_polygons(entity, scale) -> list[DrawingEntity]:
             )
         )
     return polygons
+
+
+def _read_shaft_hatch(
+    entity, scale
+) -> tuple[Shaft | None, DrawingEntity | None]:
+    layer = str(entity.dxf.get("layer", "0"))
+    if _is_excluded_shaft_layer(layer):
+        return None, None
+    explicit_hatch_layer = any(
+        token in layer.lower() for token in ("shaft", "duct", "riser", "chase")
+    )
+    if not entity.dxf.get("solid_fill") and not explicit_hatch_layer:
+        return None, None
+    try:
+        paths = list(from_hatch(entity))
+    except Exception:
+        return None, None
+    for path in paths:
+        if not path.is_closed:
+            continue
+        try:
+            points = [
+                _point(p.x, p.y, scale)
+                for p in path.flattening(HATCH_FLATTEN_MM / scale.mm_per_unit)
+            ]
+        except Exception:
+            continue
+        if len(points) < 4:
+            continue
+        area_m2 = polygon_area(points) / 1_000_000.0
+        box = bbox(points)
+        short = min(box.width, box.height)
+        long = max(box.width, box.height)
+        if not MIN_SHAFT_AREA_M2 <= area_m2 <= MAX_SHAFT_AREA_M2:
+            continue
+        if short < MIN_SHAFT_SIDE_MM or long > MAX_SHAFT_SIDE_MM:
+            continue
+        if short <= 0 or long / short > MAX_SHAFT_ASPECT:
+            continue
+        shaft = _shaft_from_points(points)
+        shaft.source = "inferred_hatch"
+        shaft.confidence = 0.65
+        shaft.services = _services_from_text(layer)
+        boundary = DrawingEntity(
+            kind="polyline",
+            layer=layer,
+            role=LayerRole.SHAFT.value,
+            points=points,
+            closed=True,
+        )
+        return shaft, boundary
+    return None, None
+
+
+def _is_excluded_shaft_layer(layer: str) -> bool:
+    lowered = layer.lower()
+    return any(token in lowered for token in EXCLUDED_SHAFT_LAYER_TOKENS)
+
+
+def _is_shaft_label(text: str) -> bool:
+    lowered = text.lower()
+    return any(token in lowered for token in SHAFT_TEXT_TOKENS)
+
+
+def _services_from_text(value: str) -> list[ShaftService]:
+    lowered = value.lower()
+    services = [
+        service
+        for service, tokens in SHAFT_SERVICE_TOKENS
+        if any(token in lowered for token in tokens)
+    ]
+    if services:
+        return services
+    return [ShaftService.DRAIN, ShaftService.WATER, ShaftService.VENT]
+
+
+def _apply_shaft_labels(
+    shafts: list[Shaft], labels: list[tuple[str, Point]]
+) -> list[Shaft]:
+    result = list(shafts)
+    for text, position in labels:
+        target = next(
+            (
+                shaft
+                for shaft in result
+                if shaft.bbox.contains(position, tolerance=500)
+            ),
+            None,
+        )
+        if target is None and result:
+            target = min(result, key=lambda shaft: distance(shaft.position, position))
+            if distance(target.position, position) > 1500:
+                target = None
+        if target is None:
+            target = Shaft(
+                id=f"S-{round(position.x)}-{round(position.y)}",
+                position=position,
+                width_mm=300.0,
+                depth_mm=300.0,
+                source="label",
+                confidence=1.0,
+            )
+            result.append(target)
+        target.name = text.strip()
+        target.services = _services_from_text(text)
+    return result
+
+
+def _shaft_is_near_wet_room(shaft: Shaft, rooms: list) -> bool:
+    if not rooms:
+        return False
+    shaft_box = shaft.bbox
+    for room in rooms:
+        room_box = room.bbox
+        dx = max(
+            0.0,
+            max(shaft_box.minx - room_box.maxx, room_box.minx - shaft_box.maxx),
+        )
+        dy = max(
+            0.0,
+            max(shaft_box.miny - room_box.maxy, room_box.miny - shaft_box.maxy),
+        )
+        if (dx * dx + dy * dy) ** 0.5 <= INFERRED_SHAFT_MAX_DISTANCE_MM:
+            return True
+    return False
 
 
 def _merge_floor_hatch_rooms(rooms, floor_hatches, entities):

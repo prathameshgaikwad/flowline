@@ -34,6 +34,16 @@ const FIXTURES = [
   { id: "KITCHEN_SINK", label: "Kitchen sink", icon: Utensils },
 ];
 
+const SERVICE_LABELS: Record<string, string> = {
+  DRAIN: "D",
+  WATER: "W",
+  VENT: "V",
+};
+
+function serviceSummary(services: string[] | undefined) {
+  return (services || []).map((service) => SERVICE_LABELS[service] || service).join("+");
+}
+
 export function NewDesignPanel({
   project,
   profiles,
@@ -74,6 +84,7 @@ export function NewDesignPanel({
   const [notesOpen, setNotesOpen] = useState(false);
   const profile = profiles.find((item) => item.id === selectedProfile);
   const hasStack = project.stacks.length > 0 || Boolean(stackPoint);
+  const waterSources = project.water_sources || [];
   const fixtureCount = selections.reduce(
     (total, item) => total + item.fixtures.length,
     0,
@@ -184,6 +195,9 @@ export function NewDesignPanel({
                   const selectedRoom = project.rooms.find(
                     (item) => item.id === selection.roomId,
                   );
+                  const detectedTypes = new Set(
+                    (selectedRoom?.fixtures || []).map((fixture) => fixture.type),
+                  );
                   return (
                     <div
                       key={selection.roomId}
@@ -216,9 +230,23 @@ export function NewDesignPanel({
                               )}
                               data-testid={`fixture-${selection.roomId}-${fixture.id.toLowerCase()}`}
                               aria-pressed={active}
+                              title={
+                                detectedTypes.has(fixture.id)
+                                  ? `${fixture.label} detected in the drawing`
+                                  : undefined
+                              }
                             >
                               <Icon size={14} aria-hidden="true" />
                               {fixture.label}
+                              {detectedTypes.has(fixture.id) && (
+                                <>
+                                  <span
+                                    className="h-1.5 w-1.5 rounded-full bg-accent"
+                                    aria-hidden="true"
+                                  />
+                                  <span className="sr-only">detected in drawing</span>
+                                </>
+                              )}
                             </button>
                           );
                         })}
@@ -251,6 +279,21 @@ export function NewDesignPanel({
                       {project.stacks.length === 1 ? "stack" : "stacks"} available
                     </span>
                   </div>
+                  {waterSources.length > 0 && (
+                    <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
+                      <Droplets size={12} aria-hidden="true" />
+                      Water inlet
+                      {waterSources.map((source) => (
+                        <span
+                          key={source.id}
+                          className="inline-flex items-center gap-1 rounded-full border border-line bg-sunken px-2 py-0.5 font-medium text-ink-soft"
+                        >
+                          {source.id}
+                          {source.shaft_id ? ` · ${source.shaft_id}` : ""}
+                        </span>
+                      ))}
+                    </p>
+                  )}
                   {selections.map((selection) => {
                     const selectedRoom = project.rooms.find(
                       (item) => item.id === selection.roomId,
@@ -278,11 +321,19 @@ export function NewDesignPanel({
                             selectedRoom?.name || selection.roomId
                           }`}
                         >
-                          {project.stacks.map((stack) => (
-                            <option key={stack.id} value={stack.id}>
-                              {stack.id}
-                            </option>
-                          ))}
+                          {project.stacks.map((stack) => {
+                            const shaft = project.shafts.find(
+                              (item) => item.id === stack.shaft_id,
+                            );
+                            return (
+                              <option key={stack.id} value={stack.id}>
+                                {stack.id}
+                                {shaft
+                                  ? ` · ${serviceSummary(shaft.services)}`
+                                  : ""}
+                              </option>
+                            );
+                          })}
                         </select>
                       </div>
                     );

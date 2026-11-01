@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core.consolidated import stacks_for_building
 from core.fixes import FixError, apply_fix, recommend_fixes
 from core.layout import generate_layouts
 from core.models import (
@@ -150,8 +151,9 @@ class AgentSession:
                 return stack
         if self.stack is not None:
             return self.stack
-        if self.building.shafts:
-            self.stack = Stack(id="S1", position=self.building.shafts[0].position)
+        stacks = stacks_for_building(self.building)
+        if stacks:
+            self.stack = stacks[0]
             self.stacks[self.stack.id] = self.stack
             return self.stack
         raise ToolError(
@@ -299,6 +301,11 @@ def _inspect_plan(arguments: dict, session: AgentSession) -> dict:
             "height_mm": round(room.bbox.height, 1),
             "closed": room.is_closed,
             "wet_area": room.is_wet_area,
+            "fixtures": [
+                _fixture_payload(fixture)
+                for fixture in building.detected_fixtures
+                if fixture.room_id == room.id
+            ],
         }
         for room in building.rooms
     ]
@@ -308,6 +315,9 @@ def _inspect_plan(arguments: dict, session: AgentSession) -> dict:
         "source_scale": building.source_scale,
         "warnings": building.warnings,
         "rooms": rooms,
+        "detected_fixtures": [
+            _fixture_payload(fixture) for fixture in building.detected_fixtures
+        ],
         "doors": [
             {"id": door.id, "x": door.position.x, "y": door.position.y, "width_mm": door.width_mm}
             for door in building.doors
@@ -315,10 +325,14 @@ def _inspect_plan(arguments: dict, session: AgentSession) -> dict:
         "shafts": [
             {
                 "id": shaft.id,
+                "name": shaft.name,
                 "x": shaft.position.x,
                 "y": shaft.position.y,
                 "width_mm": shaft.width_mm,
                 "depth_mm": shaft.depth_mm,
+                "services": [service.value for service in shaft.services],
+                "source": shaft.source,
+                "confidence": shaft.confidence,
             }
             for shaft in building.shafts
         ],
@@ -332,6 +346,21 @@ def _inspect_plan(arguments: dict, session: AgentSession) -> dict:
             ),
             "profile_id": session.profile_id,
         },
+    }
+
+
+def _fixture_payload(fixture) -> dict:
+    return {
+        "id": fixture.id,
+        "type": fixture.type.value,
+        "room_id": fixture.room_id,
+        "x": round(fixture.position.x, 1),
+        "y": round(fixture.position.y, 1),
+        "width_mm": round(fixture.width_mm, 1),
+        "depth_mm": round(fixture.depth_mm, 1),
+        "block_name": fixture.block_name,
+        "source": fixture.source,
+        "confidence": fixture.confidence,
     }
 
 

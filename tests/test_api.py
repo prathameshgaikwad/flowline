@@ -1,9 +1,12 @@
 import time
 
+import ezdxf
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import DESIGNS, app
+from app.main import DESIGNS, _project_payload, app
+from app.models import Project
+from core.dxf_import import import_dxf
 from core.models import DrawingCheck, Severity, ValidationResult
 
 client = TestClient(app)
@@ -33,6 +36,50 @@ def test_sample_project():
     assert len(data["rooms"]) >= 3
     assert data["svg"].startswith("<svg")
     assert data["shafts"]
+
+
+def test_project_payload_exposes_detected_fixtures_and_shaft_services(tmp_path):
+    path = tmp_path / "fixture_plan.dxf"
+    doc = ezdxf.new("R2010")
+    doc.header["$INSUNITS"] = 4
+    msp = doc.modelspace()
+    msp.add_lwpolyline(
+        [(0, 0), (2400, 0), (2400, 1800), (0, 1800)],
+        close=True,
+        dxfattribs={"layer": "A-ROOM"},
+    )
+    msp.add_text(
+        "BATHROOM", dxfattribs={"layer": "A-TEXT", "height": 150}
+    ).set_placement((1200, 900))
+    msp.add_lwpolyline(
+        [(2500, 0), (3100, 0), (3100, 600), (2500, 600)],
+        close=True,
+        dxfattribs={"layer": "A-SHAFT"},
+    )
+    wc = doc.blocks.new("A$C_WC")
+    wc.add_lwpolyline(
+        [(-325, -275), (325, -275), (325, 275), (-325, 275)],
+        close=True,
+    )
+    msp.add_blockref(
+        "A$C_WC",
+        (700, 900),
+        dxfattribs={"layer": "M03 Sanitaryware"},
+    )
+    doc.saveas(path)
+    project = Project(
+        id="fixture-project",
+        name="fixture_plan.dxf",
+        source_path=path,
+        building=import_dxf(path),
+    )
+
+    data = _project_payload(project)
+
+    assert data["rooms"][0]["fixtures"][0]["type"] == "WC"
+    assert data["shafts"][0]["services"] == ["DRAIN", "WATER", "VENT"]
+    assert data["stacks"][0]["shaft_id"] == data["shafts"][0]["id"]
+    assert data["water_sources"][0]["shaft_id"] == data["shafts"][0]["id"]
 
 
 def test_upload_and_reject_non_dxf():

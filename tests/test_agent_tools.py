@@ -1,9 +1,43 @@
+import ezdxf
 import pytest
 
+from agent.prompt import build_context
 from agent.tools import TOOLS, AgentSession, ToolError, tool_schemas
 from core.dxf_import import import_dxf
 from core.models import FixtureType, Stack
 from core.sample_plan import build_apartment
+
+
+def _fixture_plan(tmp_path):
+    path = tmp_path / "fixture_plan.dxf"
+    doc = ezdxf.new("R2010")
+    doc.header["$INSUNITS"] = 4
+    msp = doc.modelspace()
+    msp.add_lwpolyline(
+        [(0, 0), (2400, 0), (2400, 1800), (0, 1800)],
+        close=True,
+        dxfattribs={"layer": "A-ROOM"},
+    )
+    msp.add_text(
+        "BATHROOM", dxfattribs={"layer": "A-TEXT", "height": 150}
+    ).set_placement((1200, 900))
+    msp.add_lwpolyline(
+        [(1200, 1800), (1800, 1800), (1800, 2400), (1200, 2400)],
+        close=True,
+        dxfattribs={"layer": "A-SHAFT"},
+    )
+    wc = doc.blocks.new("A$C_WC")
+    wc.add_lwpolyline(
+        [(-325, -275), (325, -275), (325, 275), (-325, 275)],
+        close=True,
+    )
+    msp.add_blockref(
+        "A$C_WC",
+        (700, 900),
+        dxfattribs={"layer": "M03 Sanitaryware"},
+    )
+    doc.saveas(path)
+    return import_dxf(path)
 
 
 def make_session(tmp_path):
@@ -36,6 +70,32 @@ def test_tool_schemas_are_valid():
     for schema in schemas:
         assert schema["type"] == "function"
         assert schema["function"]["parameters"]["type"] == "object"
+
+
+def test_inspect_plan_reports_detected_fixtures_and_shaft_services(tmp_path):
+    building = _fixture_plan(tmp_path)
+    session = AgentSession(
+        building=building,
+        source_path=tmp_path / "fixture_plan.dxf",
+        out_dir=tmp_path / "out",
+        room_id=building.rooms[0].id,
+        fixture_types=[FixtureType.WC],
+        stack=Stack(
+            id="S1",
+            position=building.shafts[0].position,
+            shaft_id=building.shafts[0].id,
+        ),
+        profile_id="india_nbc_2016",
+    )
+
+    plan = TOOLS["inspect_plan"].run({}, session)
+    context = build_context(session)
+
+    assert plan["detected_fixtures"][0]["type"] == "WC"
+    assert plan["rooms"][0]["fixtures"][0]["type"] == "WC"
+    assert set(plan["shafts"][0]["services"]) == {"DRAIN", "WATER", "VENT"}
+    assert "WC" in context
+    assert "DRAIN" in context
 
 
 def test_full_tool_sequence(tmp_path):

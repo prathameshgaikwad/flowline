@@ -79,7 +79,7 @@ def load_project(project_id: str) -> Project | None:
         updated_at=float(data.get("updated_at") or time.time()),
     )
     parser_version = int(data.get("parser_version") or 0)
-    if not project.designs and source.exists() and parser_version < PARSER_VERSION:
+    if source.exists() and parser_version < PARSER_VERSION:
         try:
             project.building = import_dxf(source)
             save_project(project)

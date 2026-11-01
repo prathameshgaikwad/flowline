@@ -12,7 +12,9 @@ This phase is deliberately **chat-first**. Home/project grouping is deferred; th
 
 - One `Design` can cover multiple selected rooms, with a `RoomPlan` per room and shared stacks, vents, water source, sheet, and schedules.
 - Imported rooms are classified from labels plus plumbing-fixture block hints. Bathrooms, powder rooms, kitchens, balconies, utility areas, and wash areas are selected automatically; users can click the plan or room list to adjust.
-- All detected shafts are available as stacks. Each room is assigned to the nearest stack by default and can be reassigned in setup.
+- Drain-capable detected shafts are available as stacks. Each room is assigned to the nearest stack by default and can be reassigned in setup. Water- and vent-only shafts remain visible as service points.
+- Shafts expose the services they carry (`DRAIN`, `WATER`, `VENT`). Drainage terminates at a drain or combined shaft, supply originates at a water or combined shaft, and vents use a vent or combined shaft.
+- Detected source fixtures (WC, basin, shower, floor drain, kitchen sink) are exposed in the API and plan preview. A valid source arrangement is offered as the `existing` layout candidate; invalid arrangements remain visible as rejected alternatives.
 - The design sheet covers the whole selected floor and includes a room column in the schedules and all stack risers.
 - The legacy single-room request path remains supported; stored designs without room plans are normalized to one room.
 
@@ -113,6 +115,8 @@ India NBC 2016 / IS 1742 (+ IPC clearances) and US IPC 2021, per design. Every v
 ## DXF understanding
 
 - Layer roles classify walls, doors, windows, rooms, shafts and annotations.
+- Shafts come from explicit shaft/duct/riser layers or labels, plus conservative inference from small solid hatches near wet rooms. Inferred shafts are labelled with a confidence and source.
+- Nested sanitaryware block inserts are expanded in WCS and classified by block name, layer, dimensions and room context. Ambiguous blocks remain sanitaryware hints rather than being mislabelled.
 - Closed room polylines are used directly. Wall-line plans fall back to centreline extraction with collinear gap bridging, T-junction connectors and Shapely polygonization.
 - Room labels are matched to polygons; dimension notes and title text are rejected.
 - Block inserts are expanded with layer inheritance, so door/window blocks contribute real geometry.

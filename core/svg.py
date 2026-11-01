@@ -8,6 +8,7 @@ from core.layers import LayerRole, classify_layer
 from core.models import (
     Building,
     Design,
+    DetectedFixture,
     DrawingEntity,
     Fixture,
     Pipe,
@@ -15,6 +16,7 @@ from core.models import (
     PlumbingItemType,
     Room,
     Shaft,
+    ShaftService,
 )
 
 DEFAULT_TEXT_MM = 140.0
@@ -61,6 +63,11 @@ def render_svg(building: Building, design: Design | None = None, width: int = 12
     parts.append('<g class="rooms">')
     for room in building.rooms:
         parts.append(_render_room(room, sy, points_attr))
+    parts.append("</g>")
+
+    parts.append('<g class="detected-fixtures">')
+    for fixture in building.detected_fixtures:
+        parts.append(_render_detected_fixture(fixture, sy))
     parts.append("</g>")
 
     parts.append('<g class="openings">')
@@ -130,6 +137,13 @@ def _extent(building: Building, design: Design | None) -> BBox:
         points.append(door.position)
     for shaft in building.shafts:
         points.extend(_shaft_corners(shaft))
+    for fixture in building.detected_fixtures:
+        points.extend(
+            [
+                Point(x=fixture.position.x - fixture.width_mm / 2, y=fixture.position.y - fixture.depth_mm / 2),
+                Point(x=fixture.position.x + fixture.width_mm / 2, y=fixture.position.y + fixture.depth_mm / 2),
+            ]
+        )
     if design is not None:
         for fixture in design.fixtures:
             points.extend(_fixture_corners(fixture))
@@ -219,6 +233,35 @@ def _render_entity(entity: DrawingEntity, sy, points_attr) -> str:
     return ""
 
 
+def _render_detected_fixture(fixture: DetectedFixture, sy) -> str:
+    half_width = fixture.width_mm / 2
+    half_depth = fixture.depth_mm / 2
+    label = _detected_fixture_label(fixture.type)
+    return (
+        f'<g class="detected-fixture detected-fixture-{fixture.type.value}" '
+        f'data-fixture-id="{escape(fixture.id)}">'
+        f'<rect x="{fixture.position.x - half_width:.3f}" '
+        f'y="{sy(fixture.position.y + half_depth):.3f}" '
+        f'width="{fixture.width_mm:.3f}" height="{fixture.depth_mm:.3f}" rx="60">'
+        f'<title>{escape(fixture.id)} · {escape(label)} · '
+        f'{fixture.width_mm:.0f}×{fixture.depth_mm:.0f} mm</title></rect>'
+        f'<text class="detected-fixture-label" x="{fixture.position.x:.3f}" '
+        f'y="{sy(fixture.position.y):.3f}" font-size="{PIPE_TEXT_MM:.1f}" '
+        f'text-anchor="middle">{escape(label)}</text>'
+        f'</g>'
+    )
+
+
+def _detected_fixture_label(fixture_type) -> str:
+    return {
+        "WC": "WC",
+        "BASIN": "BASIN",
+        "SHOWER": "SHOWER",
+        "FLOOR_DRAIN": "FD",
+        "KITCHEN_SINK": "SINK",
+    }.get(fixture_type.value, fixture_type.value)
+
+
 def _render_room(room: Room, sy, points_attr) -> str:
     centroid = room.bbox.center
     name = room.name or f"Room {room.id}"
@@ -234,13 +277,44 @@ def _render_room(room: Room, sy, points_attr) -> str:
 
 def _render_shaft(shaft: Shaft, sy) -> str:
     box = shaft.bbox
-    return (
+    parts = [
+        f'<g class="shaft-group" data-shaft-id="{escape(shaft.id)}">',
         f'<rect class="shaft" x="{box.minx:.3f}" y="{sy(box.maxy):.3f}" '
-        f'width="{box.width:.3f}" height="{box.height:.3f}"><title>{escape(shaft.id)}</title></rect>'
-    )
+        f'width="{box.width:.3f}" height="{box.height:.3f}">'
+        f'<title>{escape(shaft.name or shaft.id)} · '
+        f'{", ".join(service.value for service in shaft.services)}</title></rect>',
+    ]
+    radius = max(45.0, min(box.width, box.height) * 0.12)
+    offsets = {
+        ShaftService.DRAIN: 0.0,
+        ShaftService.WATER: -0.24,
+        ShaftService.VENT: 0.24,
+    }
+    for service in shaft.services:
+        offset = offsets[service] * box.width
+        x = shaft.position.x + offset
+        y = sy(shaft.position.y)
+        label = {"DRAIN": "D", "WATER": "W", "VENT": "V"}[service.value]
+        parts.append(
+            f'<circle class="shaft-service shaft-service-{service.value.lower()}" '
+            f'cx="{x:.3f}" cy="{y:.3f}" r="{radius:.3f}">'
+            f'<title>{escape(service.value)} service</title></circle>'
+            f'<text class="shaft-service-label" x="{x:.3f}" '
+            f'y="{y + radius * 0.35:.3f}" font-size="{max(60.0, radius * 0.9):.1f}" '
+            f'text-anchor="middle">{label}</text>'
+        )
+    parts.append("</g>")
+    return "".join(parts)
 
 
 def _render_fixture(fixture: Fixture, sy) -> str:
+    if fixture.source == "existing":
+        return (
+            f'<text class="fixture-tag fixture-label" x="{fixture.position.x:.3f}" '
+            f'y="{sy(fixture.position.y):.3f}" font-size="{PIPE_TEXT_MM:.1f}" '
+            f'text-anchor="middle"><title>{escape(fixture.id)}</title>'
+            f'{escape(fixture.type.value)}</text>'
+        )
     box = fixture.bbox
     return (
         f'<rect class="fixture fixture-{fixture.type.value}" x="{box.minx:.3f}" '
@@ -375,6 +449,17 @@ def _style() -> str:
   .room { fill: #f8fafc; fill-opacity: 0.62; stroke: #cbd5e1; stroke-width: 18; }
   .room-label { fill: #475569; font-family: ui-sans-serif, system-ui, sans-serif; pointer-events: none; }
   .shaft { fill: #eef2ff; stroke: #4f46e5; stroke-width: 18; stroke-dasharray: 60 40; }
+  .shaft-service { stroke-width: 14; }
+  .shaft-service-drain { fill: #fee2e2; stroke: #dc2626; }
+  .shaft-service-water { fill: #dbeafe; stroke: #2563eb; }
+  .shaft-service-vent { fill: #dcfce7; stroke: #16a34a; }
+  .shaft-service-label { fill: #1e293b; font-family: ui-sans-serif, system-ui, sans-serif; font-weight: 700; pointer-events: none; }
+  .detected-fixture rect { fill: #dbeafe; fill-opacity: 0.24; stroke: #2563eb; stroke-width: 24; stroke-dasharray: 50 30; }
+  .detected-fixture-BASIN rect { fill: #e0f2fe; stroke: #0284c7; }
+  .detected-fixture-SHOWER rect { fill: #eff6ff; stroke: #1d4ed8; }
+  .detected-fixture-FLOOR_DRAIN rect { fill: #fef3c7; stroke: #b45309; }
+  .detected-fixture-KITCHEN_SINK rect { fill: #f0fdf4; stroke: #15803d; }
+  .detected-fixture-label { fill: #1d4ed8; font-family: ui-sans-serif, system-ui, sans-serif; font-weight: 700; pointer-events: none; }
   .fixture { fill: #dbeafe; stroke: #2563eb; stroke-width: 22; }
   .fixture-WC { fill: #e0f2fe; }
   .fixture-SHOWER { fill: #eff6ff; }

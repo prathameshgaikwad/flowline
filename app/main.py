@@ -30,7 +30,11 @@ from app.schemas import (
     RoomSelection,
     SheetRequest,
 )
-from core.consolidated import nearest_stack, stacks_for_building
+from core.consolidated import (
+    nearest_stack,
+    stacks_for_building,
+    water_sources_for_building,
+)
 from core.dxf_import import DxfImportError, import_dxf
 from core.fixes import FixError, apply_fix, recommend_fixes
 from core.models import Building, Severity, Stack
@@ -846,6 +850,7 @@ def _start_turn(
 def _project_payload(project: Project) -> dict:
     building = project.building
     stacks = stacks_for_building(building)
+    water_sources = water_sources_for_building(building)
     return {
         "project_id": project.id,
         "name": project.name,
@@ -867,6 +872,11 @@ def _project_payload(project: Project) -> dict:
                 "fixture_hints": [
                     fixture.value for fixture in room.fixture_hints
                 ],
+                "fixtures": [
+                    _detected_fixture_payload(fixture)
+                    for fixture in building.detected_fixtures
+                    if fixture.room_id == room.id
+                ],
                 "default_stack_id": (
                     nearest_stack(room, stacks).id
                     if nearest_stack(room, stacks) is not None
@@ -876,14 +886,28 @@ def _project_payload(project: Project) -> dict:
             }
             for room in building.rooms
         ],
+        "detected_fixtures": [
+            _detected_fixture_payload(fixture)
+            for fixture in building.detected_fixtures
+        ],
         "stacks": [
             {
                 "id": stack.id,
                 "x": stack.position.x,
                 "y": stack.position.y,
                 "diameter_mm": stack.diameter_mm,
+                "shaft_id": stack.shaft_id,
             }
             for stack in stacks
+        ],
+        "water_sources": [
+            {
+                "id": source.id,
+                "x": source.position.x,
+                "y": source.position.y,
+                "shaft_id": source.shaft_id,
+            }
+            for source in water_sources
         ],
         "doors": [
             {"id": door.id, "x": door.position.x, "y": door.position.y, "width_mm": door.width_mm}
@@ -892,10 +916,14 @@ def _project_payload(project: Project) -> dict:
         "shafts": [
             {
                 "id": shaft.id,
+                "name": shaft.name,
                 "x": shaft.position.x,
                 "y": shaft.position.y,
                 "width_mm": shaft.width_mm,
                 "depth_mm": shaft.depth_mm,
+                "services": [service.value for service in shaft.services],
+                "source": shaft.source,
+                "confidence": shaft.confidence,
             }
             for shaft in building.shafts
         ],
@@ -905,6 +933,22 @@ def _project_payload(project: Project) -> dict:
         "svg": render_svg(building),
         "created_at": project.created_at,
         "updated_at": project.updated_at,
+    }
+
+
+def _detected_fixture_payload(fixture) -> dict:
+    return {
+        "id": fixture.id,
+        "type": fixture.type.value,
+        "room_id": fixture.room_id,
+        "x": fixture.position.x,
+        "y": fixture.position.y,
+        "width_mm": fixture.width_mm,
+        "depth_mm": fixture.depth_mm,
+        "block_name": fixture.block_name,
+        "layer": fixture.layer,
+        "source": fixture.source,
+        "confidence": fixture.confidence,
     }
 
 
@@ -997,6 +1041,11 @@ def _design_payload(
             for choice in session.room_choices
         ],
         "stacks": [stack.model_dump(mode="json") for stack in stacks],
+        "water_sources": (
+            [source.model_dump(mode="json") for source in design.water_sources]
+            if design
+            else []
+        ),
         "vent_stacks": (
             [stack.model_dump(mode="json") for stack in design.vent_stacks]
             if design

@@ -1,7 +1,17 @@
 from __future__ import annotations
 
 from core.geometry import Point, distance
-from core.models import Building, Design, FixtureType, Room, RoomPlan, Stack
+from core.models import (
+    Building,
+    Design,
+    FixtureType,
+    Room,
+    RoomPlan,
+    Shaft,
+    ShaftService,
+    Stack,
+    WaterSource,
+)
 
 
 def stacks_for_building(
@@ -13,12 +23,49 @@ def stacks_for_building(
     if manual_stack is not None:
         return [Stack(id="S1", position=manual_stack)]
     shafts = list(building.shafts)
-    if shaft_id is not None:
-        shafts = [shaft for shaft in shafts if shaft.id == shaft_id]
-    return [
-        Stack(id=f"S{index}", position=shaft.position)
-        for index, shaft in enumerate(shafts, start=1)
+    drain_shafts = [
+        shaft for shaft in shafts if ShaftService.DRAIN in shaft.services
     ]
+    if not drain_shafts:
+        drain_shafts = shafts
+    if shaft_id is not None:
+        drain_shafts = [shaft for shaft in drain_shafts if shaft.id == shaft_id]
+    return [
+        Stack(
+            id=f"S{index}",
+            position=shaft.position,
+            shaft_id=shaft.id,
+        )
+        for index, shaft in enumerate(drain_shafts, start=1)
+    ]
+
+
+def water_sources_for_building(building: Building) -> list[WaterSource]:
+    sources: list[WaterSource] = []
+    for shaft in building.shafts:
+        if ShaftService.WATER not in shaft.services:
+            continue
+        sources.append(
+            WaterSource(
+                id=f"WS{len(sources) + 1}",
+                position=_port_point(
+                    shaft,
+                    0.15 if ShaftService.DRAIN in shaft.services else 0.0,
+                    0.0,
+                ),
+                shaft_id=shaft.id,
+            )
+        )
+    return sources
+
+
+def nearest_water_source(
+    room: Room, sources: list[WaterSource]
+) -> WaterSource | None:
+    if not sources:
+        return None
+    center = room.bbox.center
+    return min(sources, key=lambda source: distance(center, source.position))
 
 
 def nearest_stack(room: Room, stacks: list[Stack]) -> Stack | None:
@@ -26,6 +73,15 @@ def nearest_stack(room: Room, stacks: list[Stack]) -> Stack | None:
         return None
     center = room.bbox.center
     return min(stacks, key=lambda stack: distance(center, stack.position))
+
+
+def _port_point(shaft: Shaft, x_factor: float, y_factor: float) -> Point:
+    half_width = shaft.width_mm / 2
+    half_depth = shaft.depth_mm / 2
+    return Point(
+        x=shaft.position.x + half_width * max(-1.0, min(1.0, x_factor)),
+        y=shaft.position.y + half_depth * max(-1.0, min(1.0, y_factor)),
+    )
 
 
 def normalize_design(design: Design) -> Design:
@@ -42,6 +98,16 @@ def normalize_design(design: Design) -> Design:
 
     if not design.stacks:
         design.stacks = [design.stack]
+
+    if not design.water_sources and design.water_source is not None:
+        design.water_sources = [design.water_source]
+    if design.water_sources and design.water_source is None:
+        design.water_source = design.water_sources[0]
+    if design.water_sources:
+        source_ids = {source.id for source in design.water_sources}
+        for plan in design.room_plans:
+            if plan.water_source_id not in source_ids:
+                plan.water_source_id = design.water_sources[0].id
 
     if design.vent_stack is not None:
         if design.vent_stack.stack_id is None:
@@ -101,6 +167,8 @@ def room_design_view(design: Design, room_id: str) -> Design:
     view.stacks = [view.stack]
     view.vent_stack = design.vent_stack_for_room(room_id)
     view.vent_stacks = [view.vent_stack] if view.vent_stack else []
+    view.water_source = design.water_source_for_room(room_id)
+    view.water_sources = [view.water_source] if view.water_source else []
     return view
 
 

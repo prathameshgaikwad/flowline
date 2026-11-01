@@ -87,6 +87,8 @@ class Room(BaseModel):
 
     @property
     def default_fixtures(self) -> list[FixtureType]:
+        if self.fixture_hints:
+            return list(dict.fromkeys(self.fixture_hints))
         return default_fixtures(self.plumbing_role)
 
     @property
@@ -101,11 +103,27 @@ class Door(BaseModel):
     wall_id: str | None = None
 
 
+class ShaftService(StrEnum):
+    DRAIN = "DRAIN"
+    WATER = "WATER"
+    VENT = "VENT"
+
+
 class Shaft(BaseModel):
     id: str
     position: Point
     width_mm: float = 600.0
     depth_mm: float = 600.0
+    name: str | None = None
+    services: list[ShaftService] = Field(
+        default_factory=lambda: [
+            ShaftService.DRAIN,
+            ShaftService.WATER,
+            ShaftService.VENT,
+        ]
+    )
+    source: str = "explicit"
+    confidence: float = 1.0
 
     @property
     def bbox(self) -> BBox:
@@ -115,6 +133,20 @@ class Shaft(BaseModel):
             self.position.x + self.width_mm / 2,
             self.position.y + self.depth_mm / 2,
         )
+
+
+class DetectedFixture(BaseModel):
+    id: str
+    type: FixtureType
+    room_id: str | None = None
+    position: Point
+    width_mm: float
+    depth_mm: float
+    rotation_deg: float = 0.0
+    block_name: str | None = None
+    layer: str = "0"
+    source: str = "geometry"
+    confidence: float = 0.6
 
 
 class DrawingEntity(BaseModel):
@@ -139,6 +171,7 @@ class Building(BaseModel):
     rooms: list[Room] = Field(default_factory=list)
     doors: list[Door] = Field(default_factory=list)
     shafts: list[Shaft] = Field(default_factory=list)
+    detected_fixtures: list[DetectedFixture] = Field(default_factory=list)
     entities: list[DrawingEntity] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
@@ -162,6 +195,8 @@ class Fixture(BaseModel):
     room_id: str | None = None
     wall_id: str | None = None
     has_trap: bool = True
+    source: str = "generated"
+    source_fixture_id: str | None = None
 
     @property
     def half_extents(self) -> tuple[float, float]:
@@ -206,6 +241,7 @@ class Stack(BaseModel):
     id: str
     position: Point
     diameter_mm: float = 100.0
+    shaft_id: str | None = None
 
 
 class VentStack(BaseModel):
@@ -215,6 +251,7 @@ class VentStack(BaseModel):
     diameter_mm: float = 50.0
     height_mm: float = 3000.0
     terminates_above_roof: bool = True
+    shaft_id: str | None = None
 
 
 class WaterSource(BaseModel):
@@ -227,6 +264,7 @@ class WaterSource(BaseModel):
     heater_capacity_l: float = 50.0
     heater_fuel: str = "electric"
     material: str = "CPVC"
+    shaft_id: str | None = None
 
 
 class SupplyPipe(BaseModel):
@@ -301,6 +339,7 @@ class RoomPlan(BaseModel):
     )
     layout_id: str | None = None
     stack_id: str = "S1"
+    water_source_id: str | None = None
     rationale: str | None = None
 
 
@@ -320,6 +359,7 @@ class Design(BaseModel):
     vent_stack: VentStack | None = None
     vent_stacks: list[VentStack] = Field(default_factory=list)
     water_source: WaterSource | None = None
+    water_sources: list[WaterSource] = Field(default_factory=list)
     sheet: SheetSpec = Field(default_factory=SheetSpec)
     rationale: str | None = None
     assumptions: list[str] = Field(default_factory=list)
@@ -366,6 +406,23 @@ class Design(BaseModel):
             (item for item in self.vent_stacks if item.stack_id == stack_id),
             self.vent_stack,
         )
+
+    def water_source_for_room(self, room_id: str) -> WaterSource | None:
+        plan = next(
+            (item for item in self.room_plans if item.room_id == room_id),
+            None,
+        )
+        source_id = plan.water_source_id if plan else None
+        if source_id:
+            source = next(
+                (item for item in self.water_sources if item.id == source_id),
+                None,
+            )
+            if source is not None:
+                return source
+        if self.water_sources:
+            return self.water_sources[0]
+        return self.water_source
 
     def successor_pipes(self, node_id: str) -> list[Pipe]:
         return [pipe for pipe in self.pipes if pipe.from_node == node_id]

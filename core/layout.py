@@ -53,6 +53,11 @@ def generate_layouts(
     stack_zone = _stack_zone(building, room, stack)
 
     seen: dict[tuple, LayoutCandidate] = {}
+    source_candidate = _existing_candidate(
+        building, room, types, stack, door_zone, stack_zone
+    )
+    if source_candidate is not None:
+        seen[_signature(source_candidate.fixtures)] = source_candidate
     for pattern, groups in _pattern_variants(walls, types):
         wall_map = {wall.id: wall for wall in walls}
         for alignments in _alignment_product(len(groups)):
@@ -90,9 +95,56 @@ def generate_layouts(
     return selected
 
 
+def _existing_candidate(
+    building: Building,
+    room: Room,
+    types: list[FixtureType],
+    stack: Point,
+    door_zone: BBox | None,
+    stack_zone: BBox | None,
+) -> LayoutCandidate | None:
+    detected = [
+        fixture
+        for fixture in building.detected_fixtures
+        if fixture.room_id == room.id and fixture.type in types
+    ]
+    if not detected or {fixture.type for fixture in detected} != set(types):
+        return None
+    fixtures = [
+        Fixture(
+            id=f"{room.id}-{fixture.type.value}-EX{index}",
+            type=fixture.type,
+            position=fixture.position,
+            rotation_deg=fixture.rotation_deg,
+            width_mm=fixture.width_mm,
+            depth_mm=fixture.depth_mm,
+            room_id=room.id,
+            source="existing",
+            source_fixture_id=fixture.id,
+        )
+        for index, fixture in enumerate(detected, start=1)
+    ]
+    violations = _violations(room, fixtures, door_zone, stack_zone, stack)
+    score, hint = _score("existing", fixtures, stack, door_zone, violations, room)
+    return LayoutCandidate(
+        id="",
+        pattern="existing",
+        fixtures=fixtures,
+        score=score,
+        violations=violations,
+        rationale_hint=hint,
+    )
+
+
 def _diverse(ranked: list[LayoutCandidate], max_results: int) -> list[LayoutCandidate]:
     valid = [candidate for candidate in ranked if not candidate.violations]
+    invalid_source = [
+        candidate
+        for candidate in ranked
+        if candidate.pattern == "existing" and candidate.violations
+    ]
     pool = valid or ranked
+    budget = max(1, max_results - len(invalid_source))
 
     by_pattern: dict[str, list[LayoutCandidate]] = {}
     for candidate in pool:
@@ -100,25 +152,29 @@ def _diverse(ranked: list[LayoutCandidate], max_results: int) -> list[LayoutCand
     order = sorted(by_pattern, key=lambda pattern: -by_pattern[pattern][0].score)
     selected: list[LayoutCandidate] = []
     depth = 0
-    while len(selected) < max_results:
+    while len(selected) < budget:
         added = False
         for pattern in order:
             candidates = by_pattern[pattern]
             if depth < len(candidates):
                 selected.append(candidates[depth])
                 added = True
-                if len(selected) >= max_results:
+                if len(selected) >= budget:
                     break
         if not added:
             break
         depth += 1
 
-    if len(selected) < max_results:
+    if len(selected) < budget:
         for candidate in ranked:
             if candidate not in selected:
                 selected.append(candidate)
-            if len(selected) >= max_results:
+            if len(selected) >= budget:
                 break
+
+    for candidate in invalid_source:
+        if candidate not in selected:
+            selected.append(candidate)
 
     selected = sorted(selected, key=lambda item: (-item.score, _signature(item.fixtures)))
     return selected[:max_results]
@@ -358,6 +414,7 @@ def _score(
     if wc:
         wc_bonus = max(0.0, 500.0 - hypot(wc.position.x - stack.x, wc.position.y - stack.y)) * 0.08
     pattern_bonus = {
+        "existing": 120.0,
         "wet_wall": 30.0,
         "split": 20.0,
         "corner_shower": 25.0,
@@ -376,6 +433,7 @@ def _score(
         + pattern_bonus
     )
     hints = {
+        "existing": "Preserves the fixture positions drawn in the source plan.",
         "wet_wall": "All fixtures share the wet wall; shortest branch runs.",
         "split": "WC on the stack wall; basin and shower grouped on an adjacent wall.",
         "corner_shower": "Shower in a corner; WC kept near the stack.",

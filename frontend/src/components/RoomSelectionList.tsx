@@ -1,13 +1,21 @@
 import { Check, ChevronDown, Layers3 } from "lucide-react";
 import type { Project } from "../types";
 import { cx } from "./ui";
-import { plumbingRoleLabel, plural } from "../lib/labels";
+import { fixtureName, plumbingRoleLabel, plural } from "../lib/labels";
 
 export type SetupRoomSelection = {
   roomId: string;
   fixtures: string[];
   stackId: string;
 };
+
+const FIXTURE_ORDER = [
+  "WC",
+  "BASIN",
+  "SHOWER",
+  "FLOOR_DRAIN",
+  "KITCHEN_SINK",
+];
 
 export function RoomSelectionList({
   project,
@@ -42,6 +50,13 @@ export function RoomSelectionList({
     const selected = Boolean(selection);
     const active = activeRoomId === roomId;
     const stack = project.stacks.find((item) => item.id === selection?.stackId);
+    const detectedCounts = (room.fixtures || []).reduce<Record<string, number>>(
+      (counts, fixture) => {
+        counts[fixture.type] = (counts[fixture.type] || 0) + 1;
+        return counts;
+      },
+      {},
+    );
     return (
       <div
         key={room.id}
@@ -93,6 +108,30 @@ export function RoomSelectionList({
               </>
             )}
           </div>
+          {Object.keys(detectedCounts).length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {Object.entries(detectedCounts)
+                .sort(
+                  (first, second) =>
+                    FIXTURE_ORDER.indexOf(first[0]) -
+                    FIXTURE_ORDER.indexOf(second[0]),
+                )
+                .map(([type, count]) => (
+                <span
+                  key={type}
+                  className="inline-flex items-center gap-1 rounded-full border border-line bg-sunken px-1.5 py-0.5 text-[11px] font-medium text-ink-soft"
+                  title={`${plural(count, fixtureName(type))} detected in the drawing`}
+                >
+                  <span
+                    className="h-1.5 w-1.5 rounded-full bg-accent"
+                    aria-hidden="true"
+                  />
+                  {fixtureName(type)}
+                  {count > 1 ? ` ×${count}` : ""}
+                </span>
+              ))}
+            </div>
+          )}
         </button>
         <button
           type="button"

@@ -266,6 +266,75 @@ summary::-webkit-details-marker {
   pointer-events: none;
 }
 
+.plan-svg svg .detected-fixture rect {
+  fill: #dbeafe;
+  fill-opacity: 0.2;
+  stroke: #2563eb;
+  stroke-width: 26;
+  stroke-dasharray: 54 30;
+}
+
+.plan-svg svg .detected-fixture-BASIN rect {
+  fill: #e0f2fe;
+  stroke: #0284c7;
+}
+
+.plan-svg svg .detected-fixture-SHOWER rect {
+  fill: #eff6ff;
+  stroke: #1d4ed8;
+}
+
+.plan-svg svg .detected-fixture-FLOOR_DRAIN rect {
+  fill: #fef3c7;
+  stroke: #b45309;
+}
+
+.plan-svg svg .detected-fixture-KITCHEN_SINK rect {
+  fill: #f0fdf4;
+  stroke: #15803d;
+}
+
+.plan-svg svg .detected-fixture-label {
+  fill: #1e3a8a;
+  font-family: var(--font-sans);
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: #fffdf8;
+  stroke-width: 30px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.plan-svg svg .shaft-service {
+  stroke-width: 18;
+}
+
+.plan-svg svg .shaft-service-drain {
+  fill: #fee2e2;
+  stroke: #dc2626;
+}
+
+.plan-svg svg .shaft-service-water {
+  fill: #dbeafe;
+  stroke: #2563eb;
+}
+
+.plan-svg svg .shaft-service-vent {
+  fill: #dcfce7;
+  stroke: #16a34a;
+}
+
+.plan-svg svg .shaft-service-label {
+  fill: #1e293b;
+  font-family: var(--font-sans);
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: #fffdf8;
+  stroke-width: 24px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
 .plan-svg svg .pipe {
   stroke-width: 60;
 }

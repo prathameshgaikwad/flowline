@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from core.consolidated import room_design_view
+from core.consolidated import (
+    nearest_water_source,
+    room_design_view,
+    water_sources_for_building,
+)
 from core.fixtures import connections_for
-from core.geometry import Point, inflate_bbox
+from core.geometry import Point, distance, inflate_bbox
 from core.layout import _door_zone
 from core.models import (
     Building,
@@ -11,6 +15,8 @@ from core.models import (
     Pipe,
     PlumbingItem,
     PlumbingItemType,
+    Shaft,
+    ShaftService,
     SupplyPipe,
     SupplySystem,
     VentStack,
@@ -24,16 +30,23 @@ SOURCE_OFFSET_MM = 650.0
 
 
 def build_plumbing(building: Building, design: Design, profile: RuleProfile) -> Design:
-    design.vent_stacks = _vent_stacks(design)
-    design.vent_stack = design.vent_stacks[0]
-    design.water_source = _water_source(design)
+    design.vent_stacks = _vent_stacks(building, design)
+    design.vent_stack = design.vent_stacks[0] if design.vent_stacks else None
+    design.water_sources = water_sources_for_building(building)
+    if not design.water_sources:
+        design.water_sources = [_water_source(design)]
+    _assign_water_sources(building, design)
+    design.water_source = (
+        design.water_source_for_room(design.room_id)
+        or design.water_sources[0]
+    )
     if design.room_plans:
         vent_pipes: list[Pipe] = []
         supply_pipes: list[SupplyPipe] = []
         for plan in design.room_plans:
             view = room_design_view(design, plan.room_id)
             view.vent_stack = design.vent_stack_for_room(plan.room_id)
-            view.water_source = design.water_source
+            view.water_source = design.water_source_for_room(plan.room_id)
             try:
                 room_vents = route_vent(building, view, profile)
             except RouteError as exc:
@@ -59,11 +72,25 @@ def build_plumbing(building: Building, design: Design, profile: RuleProfile) -> 
     return design
 
 
+def _assign_water_sources(building: Building, design: Design) -> None:
+    source_ids = {source.id for source in design.water_sources}
+    for plan in design.room_plans:
+        if plan.water_source_id in source_ids:
+            continue
+        try:
+            room = building.room(plan.room_id)
+        except KeyError:
+            plan.water_source_id = None
+            continue
+        source = nearest_water_source(room, design.water_sources)
+        plan.water_source_id = source.id if source is not None else None
+
+
 def route_vent(
     building: Building, design: Design, profile: RuleProfile
 ) -> list[Pipe]:
     room = building.room(design.room_id)
-    vent_stack = design.vent_stack or _vent_stack(design)
+    vent_stack = design.vent_stack or _vent_stack(design, building)
     door_zone = _door_zone(building, room)
     pipes: list[Pipe] = []
     for index, fixture in enumerate(design.fixtures, start=1):
@@ -119,7 +146,7 @@ def route_supply(
             diameter = profile.supply.cold_fixture_mm.get(
                 fixture.type.value, profile.supply.cold_main_mm
             )
-            points = route_path(
+            points = _route_from_source(
                 room,
                 source.position,
                 connections.cold,
@@ -145,7 +172,7 @@ def route_supply(
                 fixture.type.value, profile.supply.hot_main_mm
             )
             hot_source = Point(x=source.position.x + 160, y=source.position.y + 120)
-            points = route_path(
+            points = _route_from_source(
                 room,
                 hot_source,
                 connections.hot,
@@ -168,22 +195,52 @@ def route_supply(
     return pipes
 
 
-def _vent_stacks(design: Design) -> list[VentStack]:
+def _route_from_source(
+    room,
+    source: Point,
+    target: Point,
+    obstacles,
+    door_zone,
+    label: str,
+) -> list[Point]:
+    if room.contains(source):
+        return route_path(room, source, target, obstacles, door_zone, label)
+    entry = Point(
+        x=min(max(source.x, room.bbox.minx), room.bbox.maxx),
+        y=min(max(source.y, room.bbox.miny), room.bbox.maxy),
+    )
+    points = route_path(room, entry, target, obstacles, door_zone, label)
+    if points and points[0] == source:
+        return points
+    return [source, *points]
+
+
+def _vent_stacks(building: Building, design: Design) -> list[VentStack]:
     stacks = list(design.stacks) or [design.stack]
     if design.stack.id not in {stack.id for stack in stacks}:
         stacks.insert(0, design.stack)
-    return [
-        VentStack(
-            id=f"VS{index}",
-            stack_id=stack.id,
-            position=Point(
+    result: list[VentStack] = []
+    for index, stack in enumerate(stacks, start=1):
+        shaft = _vent_shaft_for_stack(building, stack)
+        if shaft is not None:
+            position = _port_point(shaft, -0.15, 0.15)
+            shaft_id = shaft.id
+        else:
+            position = Point(
                 x=stack.position.x + VENT_OFFSET_MM,
                 y=stack.position.y,
-            ),
-            diameter_mm=50.0,
+            )
+            shaft_id = None
+        result.append(
+            VentStack(
+                id=f"VS{index}",
+                stack_id=stack.id,
+                position=position,
+                diameter_mm=50.0,
+                shaft_id=shaft_id,
+            )
         )
-        for index, stack in enumerate(stacks, start=1)
-    ]
+    return result
 
 
 def _renumber_vent(pipes: list[Pipe]) -> list[Pipe]:
@@ -205,7 +262,11 @@ def _renumber_supply(pipes: list[SupplyPipe]) -> list[SupplyPipe]:
     return pipes
 
 
-def _vent_stack(design: Design) -> VentStack:
+def _vent_stack(design: Design, building: Building | None = None) -> VentStack:
+    if building is not None:
+        stacks = _vent_stacks(building, design)
+        if stacks:
+            return stacks[0]
     return VentStack(
         id="VS1",
         stack_id=design.stack.id,
@@ -231,6 +292,42 @@ def _water_source(design: Design) -> WaterSource:
         heater_capacity_l=50.0,
         heater_fuel="electric",
         material="CPVC",
+        shaft_id=design.stack.shaft_id,
+    )
+
+
+def _shaft_for_stack(building: Building, stack) -> Shaft | None:
+    if stack.shaft_id:
+        for shaft in building.shafts:
+            if shaft.id == stack.shaft_id:
+                return shaft
+    for shaft in building.shafts:
+        if abs(shaft.position.x - stack.position.x) <= 200 and abs(
+            shaft.position.y - stack.position.y
+        ) <= 200:
+            return shaft
+    return None
+
+
+def _vent_shaft_for_stack(building: Building, stack) -> Shaft | None:
+    shaft = _shaft_for_stack(building, stack)
+    if shaft is not None and ShaftService.VENT in shaft.services:
+        return shaft
+    vent_shafts = [
+        item for item in building.shafts if ShaftService.VENT in item.services
+    ]
+    if not vent_shafts:
+        return None
+    return min(
+        vent_shafts,
+        key=lambda item: distance(item.position, stack.position),
+    )
+
+
+def _port_point(shaft: Shaft, x_factor: float, y_factor: float) -> Point:
+    return Point(
+        x=shaft.position.x + shaft.width_mm / 2 * x_factor,
+        y=shaft.position.y + shaft.depth_mm / 2 * y_factor,
     )
 
 
