@@ -15,6 +15,15 @@ export type Profile = {
   sources: string[];
 };
 
+export type PlumbingRole =
+  | "bathroom"
+  | "powder"
+  | "kitchen"
+  | "balcony"
+  | "utility"
+  | "wash_area"
+  | "none";
+
 export type Room = {
   id: string;
   name: string | null;
@@ -22,6 +31,10 @@ export type Room = {
   width_mm: number;
   height_mm: number;
   wet_area: boolean;
+  plumbing_role: PlumbingRole;
+  default_fixtures: string[];
+  fixture_hints: string[];
+  default_stack_id: string | null;
   closed: boolean;
 };
 
@@ -33,9 +46,17 @@ export type Shaft = {
   depth_mm: number;
 };
 
+export type Stack = {
+  id: string;
+  x: number;
+  y: number;
+  diameter_mm: number;
+};
+
 export type DesignSummary = {
   design_id: string;
   room_id?: string;
+  room_ids?: string[];
   profile_id?: string;
   layout_id?: string | null;
   status: string;
@@ -61,6 +82,7 @@ export type Project = {
   rooms: Room[];
   doors: { id: string; x: number; y: number; width_mm: number }[];
   shafts: Shaft[];
+  stacks: Stack[];
   designs: DesignSummary[];
   svg: string;
   created_at: number;
@@ -114,12 +136,14 @@ export type Decision = {
 export type Fixture = {
   id: string;
   type: string;
+  room_id?: string | null;
   position: { x: number; y: number };
   rotation_deg?: number;
 };
 
 export type Pipe = {
   id: string;
+  room_id?: string | null;
   from_node: string;
   to_node: string;
   system: string;
@@ -128,14 +152,83 @@ export type Pipe = {
   points: { x: number; y: number }[];
 };
 
+export type SupplyPipe = {
+  id: string;
+  from_node: string;
+  to_node: string;
+  system: string;
+  diameter_mm: number;
+  material: string;
+  insulated?: boolean;
+  points: { x: number; y: number }[];
+};
+
+export type PlumbingItem = {
+  id: string;
+  type: string;
+  position: { x: number; y: number };
+  tag?: string | null;
+  system?: string | null;
+  size?: string | null;
+  notes?: string | null;
+};
+
+export type SheetSpec = {
+  preset: string;
+  width_mm: number;
+  height_mm: number;
+  orientation: string;
+  scale: number;
+  title: string;
+  sheet_number: string;
+  revision: string;
+  drawn_by: string;
+  checked_by: string;
+  include_riser: boolean;
+  include_schedules: boolean;
+  notes: string[];
+};
+
+export type DrawingCheck = {
+  rule_id: string;
+  severity: "PASS" | "WARNING" | "ERROR";
+  message: string;
+  affected?: Record<string, unknown>;
+};
+
+export type RoomPlan = {
+  room_id: string;
+  fixture_types: string[];
+  layout_id: string | null;
+  stack_id: string;
+  rationale: string | null;
+};
+
 export type Design = {
   id: string;
   room_id: string;
+  room_ids?: string[];
+  room_plans?: RoomPlan[];
   profile_id: string;
   layout_id?: string | null;
   fixtures: Fixture[];
   pipes: Pipe[];
+  vent_pipes?: Pipe[];
+  supply_pipes?: SupplyPipe[];
+  plumbing_items?: PlumbingItem[];
   stack: { id: string; position: { x: number; y: number }; diameter_mm: number };
+  stacks?: { id: string; position: { x: number; y: number }; diameter_mm: number }[];
+  vent_stack?: { id: string; position: { x: number; y: number }; diameter_mm: number } | null;
+  vent_stacks?: { id: string; position: { x: number; y: number }; diameter_mm: number }[];
+  water_source?: {
+    id: string;
+    position: { x: number; y: number };
+    pressure_kpa: number;
+    heater: boolean;
+    heater_capacity_l: number;
+    material: string;
+  } | null;
+  sheet?: SheetSpec;
   rationale?: string | null;
   assumptions?: string[];
 };
@@ -144,8 +237,12 @@ export type DesignState = {
   design_id: string | null;
   project_id: string;
   room_id: string | null;
+  room_ids?: string[];
+  room_plans?: RoomPlan[];
+  fixtures_by_room?: { room_id: string; fixtures: string[] }[];
   fixtures: string[];
   stack: { id: string; position: { x: number; y: number }; diameter_mm: number } | null;
+  stacks?: { id: string; position: { x: number; y: number }; diameter_mm: number }[];
   profile_id: string;
   profile_name: string;
   disclaimer: string;
@@ -158,6 +255,24 @@ export type DesignState = {
   fixes: Fix[];
   candidates: Candidate[];
   design: Design | null;
+  vent_pipes?: Pipe[];
+  supply_pipes?: SupplyPipe[];
+  plumbing_items?: PlumbingItem[];
+  vent_stack?: { id: string; position: { x: number; y: number }; diameter_mm: number } | null;
+  water_source?: {
+    id: string;
+    position: { x: number; y: number };
+    pressure_kpa: number;
+    heater: boolean;
+    heater_capacity_l: number;
+    material: string;
+  } | null;
+  sheet?: SheetSpec | null;
+  drawing_review?: DrawingCheck[];
+  sheet_ready?: boolean;
+  sheet_pages?: number;
+  sheet_svg_url?: string | null;
+  sheet_pdf_url?: string | null;
   validation: Issue[];
   decisions: Decision[];
   plan: PlanStep[];

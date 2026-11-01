@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from core.geometry import BBox, Point, bbox, point_in_polygon, polygon_area
+from core.plumbing_zones import PlumbingRole, classify_room, default_fixtures
 
 
 class FixtureType(StrEnum):
@@ -22,6 +23,25 @@ class System(StrEnum):
     VENT = "VENT"
 
 
+class SupplySystem(StrEnum):
+    COLD = "COLD_WATER"
+    HOT = "HOT_WATER"
+
+
+class PlumbingItemType(StrEnum):
+    WATER_HEATER = "WATER_HEATER"
+    EXPANSION_TANK = "EXPANSION_TANK"
+    MAIN_SHUTOFF = "MAIN_SHUTOFF"
+    FIXTURE_STOP = "FIXTURE_STOP"
+    CHECK_VALVE = "CHECK_VALVE"
+    BACKFLOW_PREVENTER = "BACKFLOW_PREVENTER"
+    PRESSURE_REDUCING_VALVE = "PRESSURE_REDUCING_VALVE"
+    CLEANOUT = "CLEANOUT"
+    TRAP_PRIMER = "TRAP_PRIMER"
+    VENT_TERMINATION = "VENT_TERMINATION"
+    AIR_ADMITTANCE_VALVE = "AIR_ADMITTANCE_VALVE"
+
+
 class Severity(StrEnum):
     PASS = "PASS"
     WARNING = "WARNING"
@@ -34,6 +54,8 @@ class Room(BaseModel):
     floor_id: str = "F-01"
     boundary: list[Point] = Field(min_length=3)
     closed: bool = True
+    fixture_hints: list[FixtureType] = Field(default_factory=list)
+    has_sanitaryware: bool = False
 
     @property
     def is_closed(self) -> bool:
@@ -57,9 +79,19 @@ class Room(BaseModel):
         return point_in_polygon(point, self.boundary)
 
     @property
+    def plumbing_role(self) -> PlumbingRole:
+        role = classify_room(self.name, self.fixture_hints)
+        if role == PlumbingRole.NONE and self.has_sanitaryware:
+            return PlumbingRole.POWDER
+        return role
+
+    @property
+    def default_fixtures(self) -> list[FixtureType]:
+        return default_fixtures(self.plumbing_role)
+
+    @property
     def is_wet_area(self) -> bool:
-        name = (self.name or "").lower()
-        return any(token in name for token in ("bath", "toilet", "wc", "shower", "wash"))
+        return self.plumbing_role != PlumbingRole.NONE
 
 
 class Door(BaseModel):
@@ -88,9 +120,13 @@ class Shaft(BaseModel):
 class DrawingEntity(BaseModel):
     kind: str
     layer: str = "0"
+    role: str = "other"
     points: list[Point] = Field(default_factory=list)
+    closed: bool = False
     center: Point | None = None
     radius: float | None = None
+    start_angle: float | None = None
+    end_angle: float | None = None
     text: str | None = None
     position: Point | None = None
     block_name: str | None = None
@@ -163,6 +199,7 @@ class Pipe(BaseModel):
     slope: float | None = None
     from_node: str
     to_node: str
+    room_id: str | None = None
 
 
 class Stack(BaseModel):
@@ -171,16 +208,128 @@ class Stack(BaseModel):
     diameter_mm: float = 100.0
 
 
+class VentStack(BaseModel):
+    id: str = "VS1"
+    stack_id: str | None = None
+    position: Point
+    diameter_mm: float = 50.0
+    height_mm: float = 3000.0
+    terminates_above_roof: bool = True
+
+
+class WaterSource(BaseModel):
+    id: str = "WS1"
+    position: Point
+    pressure_kpa: float = 300.0
+    cold_diameter_mm: float = 25.0
+    hot_diameter_mm: float = 20.0
+    heater: bool = True
+    heater_capacity_l: float = 50.0
+    heater_fuel: str = "electric"
+    material: str = "CPVC"
+
+
+class SupplyPipe(BaseModel):
+    id: str
+    system: SupplySystem
+    diameter_mm: float
+    points: list[Point] = Field(min_length=2)
+    from_node: str
+    to_node: str
+    material: str = "CPVC"
+    insulated: bool = True
+    room_id: str | None = None
+
+
+class PlumbingItem(BaseModel):
+    id: str
+    type: PlumbingItemType
+    position: Point
+    tag: str | None = None
+    system: str | None = None
+    size: str | None = None
+    notes: str | None = None
+    room_id: str | None = None
+
+
+class SheetSpec(BaseModel):
+    preset: str = "A3"
+    width_mm: float = 420.0
+    height_mm: float = 297.0
+    orientation: str = "landscape"
+    scale: float = 50.0
+    title: str = "Bathroom Plumbing Plan"
+    sheet_number: str = "P-101"
+    revision: str = "A"
+    drawn_by: str = "Flowline"
+    checked_by: str = ""
+    include_riser: bool = True
+    include_schedules: bool = True
+    notes: list[str] = Field(
+        default_factory=lambda: [
+            "Verify all dimensions and clearances on site.",
+            "Provide access to valves, cleanouts, and the vent termination.",
+        ]
+    )
+
+
+SHEET_PRESETS_MM: dict[str, tuple[float, float]] = {
+    "A4": (210.0, 297.0),
+    "A3": (297.0, 420.0),
+    "A2": (420.0, 594.0),
+    "A1": (594.0, 841.0),
+    "A0": (841.0, 1189.0),
+    "ANSI_A": (215.9, 279.4),
+    "ANSI_B": (279.4, 431.8),
+    "ANSI_C": (431.8, 558.8),
+    "ANSI_D": (558.8, 863.6),
+    "ANSI_E": (863.6, 1117.6),
+}
+
+
+class DrawingCheck(BaseModel):
+    rule_id: str
+    severity: Severity
+    message: str
+    affected: dict[str, Any] = Field(default_factory=dict)
+
+
+class RoomPlan(BaseModel):
+    room_id: str
+    fixture_types: list[FixtureType] = Field(
+        default_factory=lambda: [FixtureType.WC, FixtureType.BASIN, FixtureType.SHOWER]
+    )
+    layout_id: str | None = None
+    stack_id: str = "S1"
+    rationale: str | None = None
+
+
 class Design(BaseModel):
     id: str = "DESIGN-01"
     room_id: str
     profile_id: str
     layout_id: str | None = None
+    room_plans: list[RoomPlan] = Field(default_factory=list)
     fixtures: list[Fixture] = Field(default_factory=list)
     pipes: list[Pipe] = Field(default_factory=list)
+    vent_pipes: list[Pipe] = Field(default_factory=list)
+    supply_pipes: list[SupplyPipe] = Field(default_factory=list)
+    plumbing_items: list[PlumbingItem] = Field(default_factory=list)
     stack: Stack
+    stacks: list[Stack] = Field(default_factory=list)
+    vent_stack: VentStack | None = None
+    vent_stacks: list[VentStack] = Field(default_factory=list)
+    water_source: WaterSource | None = None
+    sheet: SheetSpec = Field(default_factory=SheetSpec)
     rationale: str | None = None
     assumptions: list[str] = Field(default_factory=list)
+    route_failures: list[str] = Field(default_factory=list)
+
+    @property
+    def room_ids(self) -> list[str]:
+        if self.room_plans:
+            return [plan.room_id for plan in self.room_plans]
+        return [self.room_id] if self.room_id else []
 
     def fixture(self, fixture_id: str) -> Fixture:
         for fixture in self.fixtures:
@@ -188,15 +337,46 @@ class Design(BaseModel):
                 return fixture
         raise KeyError(f"Unknown fixture {fixture_id!r}.")
 
+    def room_plan(self, room_id: str) -> RoomPlan:
+        for plan in self.room_plans:
+            if plan.room_id == room_id:
+                return plan
+        raise KeyError(f"Unknown room plan {room_id!r}.")
+
+    def fixtures_for_room(self, room_id: str) -> list[Fixture]:
+        return [fixture for fixture in self.fixtures if fixture.room_id == room_id]
+
+    def pipes_for_room(self, room_id: str) -> list[Pipe]:
+        return [pipe for pipe in self.pipes if pipe.room_id == room_id]
+
+    def stack_for_room(self, room_id: str) -> Stack:
+        plan = next(
+            (item for item in self.room_plans if item.room_id == room_id),
+            None,
+        )
+        stack_id = plan.stack_id if plan else self.stack.id
+        return next(
+            (stack for stack in self.stacks if stack.id == stack_id),
+            self.stack,
+        )
+
+    def vent_stack_for_room(self, room_id: str) -> VentStack | None:
+        stack_id = self.stack_for_room(room_id).id
+        return next(
+            (item for item in self.vent_stacks if item.stack_id == stack_id),
+            self.vent_stack,
+        )
+
     def successor_pipes(self, node_id: str) -> list[Pipe]:
         return [pipe for pipe in self.pipes if pipe.from_node == node_id]
 
     def reaches_stack(self, fixture_id: str) -> bool:
+        stack_ids = {stack.id for stack in self.stacks} or {self.stack.id}
         seen: set[str] = set()
         pending = [fixture_id]
         while pending:
             node = pending.pop()
-            if node == self.stack.id:
+            if node in stack_ids:
                 return True
             if node in seen:
                 continue

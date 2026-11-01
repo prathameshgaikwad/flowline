@@ -1,137 +1,200 @@
 import {
   ArrowRightLeft,
   CheckCircle2,
-  Scale,
   ShieldAlert,
   Wrench,
 } from "lucide-react";
-import type { Decision } from "../types";
+import type { Decision, Project } from "../types";
+import { roomNameFor } from "../lib/labels";
+import { Badge, cx } from "./ui";
 
-function Counts({ counts }: { counts?: Record<string, number> }) {
-  if (!counts) return null;
-  return (
-    <span className="flex gap-1 text-[9px] font-semibold">
-      <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-emerald-700">
-        {counts.PASS || 0} pass
-      </span>
-      <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-amber-700">
-        {counts.WARNING || 0} warn
-      </span>
-      <span className="rounded-full bg-red-50 px-1.5 py-0.5 text-red-700">
-        {counts.ERROR || 0} error
-      </span>
-    </span>
-  );
+function decisionTime(decision: Decision) {
+  if (!decision.at) return null;
+  const date = new Date(Number(decision.at) * 1000);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
-export function DecisionList({ decisions }: { decisions: Decision[] }) {
+export function DecisionList({
+  decisions,
+  currentLayoutId,
+  project,
+  roomLayouts,
+}: {
+  decisions: Decision[];
+  currentLayoutId?: string | null;
+  project?: Project | null;
+  roomLayouts?: Record<string, string | null>;
+}) {
   if (!decisions.length) {
-    return <p className="text-xs text-slate-500">No decisions recorded yet.</p>;
+    return (
+      <p className="rounded-card border border-dashed border-line-strong bg-sunken px-4 py-4 text-label text-muted">
+        No decisions recorded yet.
+      </p>
+    );
   }
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {[...decisions].reverse().map((decision, index) => {
+        const time = decisionTime(decision);
         if (decision.kind === "layout_selected") {
           const rejected = (decision.rejected || []) as {
             id: string;
             reason: string;
             score?: number;
           }[];
+          const roomId = decision.room_id ? String(decision.room_id) : null;
+          const layoutForRoom = roomId
+            ? roomLayouts?.[roomId] ?? null
+            : currentLayoutId;
+          const isCurrent =
+            Boolean(layoutForRoom) &&
+            String(decision.candidate_id) === String(layoutForRoom);
+          const isEarlier = Boolean(layoutForRoom) && !isCurrent;
           return (
-            <div
+            <article
               key={`${decision.kind}-${index}`}
-              className="rounded-xl border border-blue-100 bg-blue-50/50 p-2.5"
+              className={cx(
+                "rounded-card border p-4",
+                isEarlier
+                  ? "border-line bg-sunken/60"
+                  : "border-accent/20 bg-accent-soft/60",
+              )}
             >
-              <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-blue-700">
-                <CheckCircle2 size={12} /> Layout selected
+              <div className="flex flex-wrap items-center gap-2">
+                <div
+                  className={cx(
+                    "flex items-center gap-1.5 text-label font-semibold",
+                    isEarlier ? "text-muted" : "text-accent",
+                  )}
+                >
+                  <CheckCircle2 size={15} aria-hidden="true" /> Layout selected
+                </div>
+                {roomId ? (
+                  <Badge tone="neutral">{roomNameFor(project || null, roomId)}</Badge>
+                ) : null}
+                {isCurrent && <Badge tone="accent">Current</Badge>}
+                {isEarlier && <Badge tone="neutral">Earlier</Badge>}
+                {time && (
+                  <time className="ml-auto text-xs text-muted" dateTime={new Date(Number(decision.at) * 1000).toISOString()}>
+                    {time}
+                  </time>
+                )}
               </div>
-              <div className="mt-1 text-xs font-bold text-slate-900">
+              <div className="mt-2 text-ui font-semibold text-ink">
                 {String(decision.candidate_id)} · {String(decision.pattern)}
               </div>
-              <p className="mt-1 text-[10px] leading-relaxed text-slate-600">
+              <p className="mt-1 text-label leading-relaxed text-muted">
                 {String(decision.rationale || "No rationale recorded.")}
               </p>
               {rejected.length > 0 && (
-                <div className="mt-2 border-t border-blue-100 pt-1.5">
-                  <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-blue-500">
-                    Rejected alternatives
+                <div className="mt-3 border-t border-line/80 pt-2.5">
+                  <div className="text-xs font-semibold uppercase tracking-[0.06em] text-muted">
+                    Other layouts considered
                   </div>
-                  <ul className="mt-1 space-y-0.5">
+                  <ul className="mt-1.5 space-y-1.5">
                     {rejected.map((item) => (
-                      <li key={item.id} className="text-[10px] text-slate-500">
-                        <span className="font-semibold text-slate-700">{item.id}</span>{" "}
+                      <li key={item.id} className="text-label leading-relaxed text-muted">
+                        <span className="font-mono font-semibold text-ink-soft">
+                          {item.id}
+                        </span>{" "}
                         — {item.reason}
                       </li>
                     ))}
                   </ul>
                 </div>
               )}
-            </div>
+            </article>
           );
         }
         if (decision.kind === "fix_applied") {
           return (
-            <div
+            <article
               key={`${decision.kind}-${index}`}
-              className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-2.5"
+              className="rounded-card border border-success-line bg-success-soft/60 p-4"
             >
-              <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-700">
-                <Wrench size={12} /> Fix applied
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 text-label font-semibold text-success">
+                  <Wrench size={15} aria-hidden="true" /> Fix applied
+                </div>
+                {time && (
+                  <time className="ml-auto text-xs text-muted" dateTime={new Date(Number(decision.at) * 1000).toISOString()}>
+                    {time}
+                  </time>
+                )}
               </div>
-              <p className="mt-1 text-[10px] text-slate-600">{String(decision.description)}</p>
-              <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                <Counts counts={decision.before as Record<string, number>} />
-                <ArrowRightLeft size={10} className="text-slate-400" />
-                <Counts counts={decision.after as Record<string, number>} />
-              </div>
-            </div>
+              <p className="mt-1.5 text-label leading-relaxed text-muted">
+                {String(decision.description)}
+              </p>
+            </article>
           );
         }
         if (decision.kind === "profile_changed") {
           return (
-            <div
+            <article
               key={`${decision.kind}-${index}`}
-              className="rounded-xl border border-sky-100 bg-sky-50/50 p-2.5"
+              className="rounded-card border border-line bg-raised p-4"
             >
-              <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-sky-700">
-                <ArrowRightLeft size={12} /> Standard changed
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 text-label font-semibold text-muted">
+                  <ArrowRightLeft size={15} aria-hidden="true" /> Code standard
+                  changed
+                </div>
+                {time && (
+                  <time className="ml-auto text-xs text-muted" dateTime={new Date(Number(decision.at) * 1000).toISOString()}>
+                    {time}
+                  </time>
+                )}
               </div>
-              <p className="mt-1 text-[10px] text-slate-600">
+              <p className="mt-1.5 text-label leading-relaxed text-muted">
                 {String(decision.previous_profile)} → {String(decision.profile_id)}.{" "}
                 {String(decision.reason || "")}
               </p>
-            </div>
+            </article>
           );
         }
-        if (decision.kind === "validation") {
+        if (
+          decision.kind === "route_failed" ||
+          decision.kind === "fixtures_changed"
+        ) {
+          const failed = decision.kind === "route_failed";
           return (
-            <div
+            <article
               key={`${decision.kind}-${index}`}
-              className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50/60 p-2.5"
+              className={cx(
+                "rounded-card border p-4",
+                failed
+                  ? "border-warning-line bg-warning-soft/60"
+                  : "border-line bg-raised",
+              )}
             >
-              <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
-                <Scale size={12} /> Validation · {String(decision.profile_id)}
+              <div className="flex items-center gap-2">
+                <div
+                  className={cx(
+                    "flex items-center gap-1.5 text-label font-semibold",
+                    failed ? "text-warning" : "text-muted",
+                  )}
+                >
+                  <ShieldAlert size={15} aria-hidden="true" />{" "}
+                  {failed ? "Route failed" : "Fixtures updated"}
+                </div>
+                {time && (
+                  <time className="ml-auto text-xs text-muted" dateTime={new Date(Number(decision.at) * 1000).toISOString()}>
+                    {time}
+                  </time>
+                )}
               </div>
-              <Counts counts={decision.counts as Record<string, number>} />
-            </div>
-          );
-        }
-        if (decision.kind === "route_failed" || decision.kind === "fixtures_changed") {
-          return (
-            <div
-              key={`${decision.kind}-${index}`}
-              className="rounded-xl border border-amber-100 bg-amber-50/50 p-2.5"
-            >
-              <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-amber-700">
-                <ShieldAlert size={12} />{" "}
-                {decision.kind === "route_failed" ? "Route failed" : "Fixtures changed"}
-              </div>
-              <p className="mt-1 text-[10px] text-slate-600">
-                {decision.kind === "route_failed"
+              <p className="mt-1.5 text-label leading-relaxed text-muted">
+                {failed
                   ? String(decision.message)
                   : `Now using ${(decision.fixtures as string[])?.join(", ")}.`}
               </p>
-            </div>
+            </article>
           );
         }
         return null;

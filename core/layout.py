@@ -418,11 +418,16 @@ def _front_zone(fixture: Fixture, depth: float) -> BBox:
 
 
 def _door_zone(building: Building, room: Room) -> BBox | None:
-    if not building.doors:
-        return None
     box = room.bbox
+    doors = [
+        door
+        for door in building.doors
+        if box.contains(door.position, tolerance=600)
+    ]
+    if not doors:
+        return None
     door = min(
-        building.doors,
+        doors,
         key=lambda item: hypot(
             item.position.x - box.center.x, item.position.y - box.center.y
         ),

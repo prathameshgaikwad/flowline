@@ -68,6 +68,7 @@ def test_tight_bathroom_flags_room_size(tmp_path):
     build_tight_bathroom(path)
     building = import_dxf(path)
     room = building.rooms[0]
+    room.name = "BATHROOM"
     stack = Stack(id="S1", position=building.shafts[0].position)
     design = Design(
         room_id=room.id,

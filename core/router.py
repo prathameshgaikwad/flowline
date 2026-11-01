@@ -20,39 +20,72 @@ class RouteError(ValueError):
 
 
 def route_design(building: Building, design: Design, profile: RuleProfile) -> list[Pipe]:
-    room = building.room(design.room_id)
-    door_zone = _door_zone(building, room)
-    pipes: list[Pipe] = []
-    for index, fixture in enumerate(design.fixtures, start=1):
-        obstacles = [
-            inflate_bbox(other.bbox, 50)
-            for other in design.fixtures
-            if other.id != fixture.id
-        ]
-        start = fixture.drain_point(design.stack.position)
-        points = _route_one(
-            room,
-            start,
-            design.stack.position,
-            obstacles,
-            door_zone,
-            fixture.id,
-        )
-        rule = profile.pipe_for(fixture.type)
-        slope = profile.slope_for(rule.system).default
-        pipes.append(
-            Pipe(
-                id=f"P-{index:02d}",
-                system=rule.system,
-                diameter_mm=rule.diameter_mm,
-                points=points,
-                slope=slope,
-                from_node=fixture.id,
-                to_node=design.stack.id,
+    if design.room_plans:
+        scopes = [
+            (
+                plan.room_id,
+                design.stack_for_room(plan.room_id),
+                design.fixtures_for_room(plan.room_id),
             )
-        )
+            for plan in design.room_plans
+        ]
+    else:
+        scopes = [(design.room_id, design.stack, design.fixtures)]
+
+    pipes: list[Pipe] = []
+    failures: list[str] = []
+    for room_id, stack, fixtures in scopes:
+        if not fixtures:
+            continue
+        room = building.room(room_id)
+        door_zone = _door_zone(building, room)
+        for fixture in fixtures:
+            obstacles = [
+                inflate_bbox(other.bbox, 50)
+                for other in fixtures
+                if other.id != fixture.id
+            ]
+            start = fixture.drain_point(stack.position)
+            try:
+                points = _route_one(
+                    room,
+                    start,
+                    stack.position,
+                    obstacles,
+                    door_zone,
+                    fixture.id,
+                )
+            except RouteError as exc:
+                failures.append(f"{room_id}: {exc}")
+                continue
+            rule = profile.pipe_for(fixture.type)
+            slope = profile.slope_for(rule.system).default
+            pipes.append(
+                Pipe(
+                    id=f"P-{len(pipes) + 1:02d}",
+                    system=rule.system,
+                    diameter_mm=rule.diameter_mm,
+                    points=points,
+                    slope=slope,
+                    from_node=fixture.id,
+                    to_node=stack.id,
+                    room_id=room_id,
+                )
+            )
     design.pipes = pipes
+    design.route_failures = failures
     return pipes
+
+
+def route_path(
+    room: Room,
+    start: Point,
+    end: Point,
+    obstacles: list[BBox],
+    door_zone: BBox | None,
+    label: str = "route",
+) -> list[Point]:
+    return _route_one(room, start, end, obstacles, door_zone, label)
 
 
 def _route_one(
@@ -123,16 +156,24 @@ def _grid_bounds(room: Room, start: Point, end: Point) -> tuple[BBox, BBox | Non
     bounds = BBox(minx, miny, maxx, maxy)
 
     corridor: BBox | None = None
-    if not room.bbox.contains(end, tolerance=1):
-        nearest = Point(
-            x=min(max(end.x, room.bbox.minx), room.bbox.maxx),
-            y=min(max(end.y, room.bbox.miny), room.bbox.maxy),
-        )
+    outside = [
+        point for point in (start, end) if not room.bbox.contains(point, tolerance=1)
+    ]
+    if outside:
+        xs: list[float] = []
+        ys: list[float] = []
+        for point in outside:
+            nearest = Point(
+                x=min(max(point.x, room.bbox.minx), room.bbox.maxx),
+                y=min(max(point.y, room.bbox.miny), room.bbox.maxy),
+            )
+            xs.extend([nearest.x, point.x])
+            ys.extend([nearest.y, point.y])
         corridor = BBox(
-            min(nearest.x, end.x) - 200,
-            min(nearest.y, end.y) - 200,
-            max(nearest.x, end.x) + 200,
-            max(nearest.y, end.y) + 200,
+            min(xs) - 200,
+            min(ys) - 200,
+            max(xs) + 200,
+            max(ys) + 200,
         )
     return bounds, corridor
 

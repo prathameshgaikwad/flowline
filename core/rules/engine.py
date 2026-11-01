@@ -6,6 +6,8 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.consolidated import room_design_view
+from core.fixtures import connections_for
 from core.geometry import (
     Point,
     inflate_bbox,
@@ -14,7 +16,17 @@ from core.geometry import (
     segment_intersects_bbox,
 )
 from core.layout import _door_zone, _front_distance, _side_distance, _stack_zone
-from core.models import Building, Design, FixtureType, Severity, System, ValidationResult
+from core.models import (
+    Building,
+    Design,
+    FixtureType,
+    PlumbingItemType,
+    PlumbingRole,
+    Severity,
+    SupplySystem,
+    System,
+    ValidationResult,
+)
 
 PROFILE_DIR = Path(__file__).resolve().parent / "profiles"
 
@@ -26,6 +38,7 @@ class RoomRules(BaseModel):
     wc_min_area_m2: float = 0.0
     wc_min_width_mm: float = 0.0
     bathroom_min_area_m2: float = 0.0
+    bathroom_min_width_mm: float = 0.0
     door_min_width_mm: float = 0.0
     source: str
 
@@ -73,6 +86,26 @@ class VentRules(BaseModel):
     source: str
 
 
+class SupplyRules(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    cold_main_mm: float
+    hot_main_mm: float
+    cold_fixture_mm: dict[str, float] = Field(default_factory=dict)
+    hot_fixture_mm: dict[str, float] = Field(default_factory=dict)
+    max_velocity_m_s: float
+    min_pressure_kpa: float
+    heater_min_l: float
+    material: str
+    source: str
+
+
+class CleanoutRules(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    stack_base_required: bool = True
+    max_horizontal_run_mm: float
+    source: str
+
+
 class RuleProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str
@@ -86,6 +119,8 @@ class RuleProfile(BaseModel):
     slopes: dict[str, SlopeRule]
     stack: StackRules
     vent: VentRules
+    supply: SupplyRules
+    cleanouts: CleanoutRules
     fixture_units: dict[str, float] = Field(default_factory=dict)
     sources: list[str] = Field(default_factory=list)
 
@@ -138,6 +173,46 @@ def validate_design(
 ) -> list[ValidationResult]:
     if isinstance(profile, str):
         profile = load_profile(profile)
+    if design.room_plans:
+        results: list[ValidationResult] = []
+        for plan in design.room_plans:
+            view = room_design_view(design, plan.room_id)
+            room_results = _validate_room(
+                building, view, profile, include_equipment=False
+            )
+            for result in room_results:
+                result.affected.setdefault("room_id", plan.room_id)
+            results.extend(room_results)
+        loads: dict[str, float] = {}
+        for plan in design.room_plans:
+            unit_total = sum(
+                profile.fixture_unit(fixture.type)
+                for fixture in design.fixtures_for_room(plan.room_id)
+            )
+            loads[plan.stack_id] = loads.get(plan.stack_id, 0.0) + unit_total
+        for stack_id, unit_total in sorted(loads.items()):
+            results.append(
+                _check(
+                    "STACK_FIXTURE_LOAD",
+                    True,
+                    f"Stack {stack_id} carries {unit_total:g} DFU across its rooms.",
+                    profile.stack.source,
+                    measured=unit_total,
+                    affected={"stack_id": stack_id},
+                )
+            )
+        results.extend(_equipment_results(design, profile))
+        return results
+    return _validate_room(building, design, profile)
+
+
+def _validate_room(
+    building: Building,
+    design: Design,
+    profile: RuleProfile,
+    *,
+    include_equipment: bool = True,
+) -> list[ValidationResult]:
     try:
         room = building.room(design.room_id)
     except KeyError:
@@ -155,6 +230,10 @@ def validate_design(
     results.extend(_room_results(building, room, design, profile))
     results.extend(_fixture_results(building, room, design, profile))
     results.extend(_pipe_results(building, room, design, profile))
+    results.extend(_vent_results(building, room, design, profile))
+    results.extend(_supply_results(building, room, design, profile))
+    if include_equipment:
+        results.extend(_equipment_results(design, profile))
     return results
 
 
@@ -202,13 +281,27 @@ def _room_results(building, room, design, profile: RuleProfile) -> list[Validati
         )
 
     types = {fixture.type for fixture in design.fixtures}
-    if FixtureType.WC in types and (
+    role = room.plumbing_role
+    if role == PlumbingRole.POWDER:
+        min_area = profile.room.wc_min_area_m2
+        min_width = profile.room.wc_min_width_mm
+        label = "powder room"
+    elif role in {
+        PlumbingRole.KITCHEN,
+        PlumbingRole.BALCONY,
+        PlumbingRole.UTILITY,
+        PlumbingRole.WASH_AREA,
+    }:
+        min_area = 0.0
+        min_width = 0.0
+        label = role.value.replace("_", " ")
+    elif role == PlumbingRole.BATHROOM and FixtureType.WC in types and (
         FixtureType.BASIN in types or FixtureType.SHOWER in types
     ):
         min_area = profile.room.combined_min_area_m2
         min_width = profile.room.combined_min_width_mm
         label = "combined bathroom"
-    elif FixtureType.WC in types:
+    elif FixtureType.WC in types and role != PlumbingRole.BATHROOM:
         min_area = profile.room.wc_min_area_m2
         min_width = profile.room.wc_min_width_mm
         label = "WC"
@@ -254,12 +347,17 @@ def _room_results(building, room, design, profile: RuleProfile) -> list[Validati
             )
         )
 
-    if not building.doors:
+    room_doors = [
+        door
+        for door in building.doors
+        if room.bbox.contains(door.position, tolerance=600)
+    ]
+    if not room_doors:
         results.append(
             _check(
                 "DOOR_PRESENT",
                 False,
-                "No door detected; door clearance was not checked.",
+                "No door detected for this room; door clearance was not checked.",
                 "Flowline import",
                 fail_severity=Severity.WARNING,
                 fix_ids=["set_door"],
@@ -267,7 +365,7 @@ def _room_results(building, room, design, profile: RuleProfile) -> list[Validati
             )
         )
     else:
-        for door in building.doors:
+        for door in room_doors:
             results.append(
                 _check(
                     "DOOR_WIDTH",
@@ -663,6 +761,232 @@ def _pipe_results(building, room, design, profile: RuleProfile) -> list[Validati
             affected={},
         )
     )
+    return results
+
+
+def _vent_results(building, room, design, profile: RuleProfile) -> list[ValidationResult]:
+    results: list[ValidationResult] = []
+    if design.vent_stack is None:
+        results.append(
+            _check(
+                "VENT_STACK",
+                False,
+                "No vent stack has been created.",
+                profile.vent.source,
+                affected={"room_id": room.id},
+                fail_severity=Severity.WARNING,
+            )
+        )
+    else:
+        results.append(
+            _check(
+                "VENT_STACK",
+                design.vent_stack.diameter_mm + 0.1 >= profile.vent.min_diameter_mm,
+                f"Vent stack {design.vent_stack.id} diameter "
+                f"{design.vent_stack.diameter_mm:g} mm; minimum "
+                f"{profile.vent.min_diameter_mm:g} mm.",
+                profile.vent.source,
+                measured=design.vent_stack.diameter_mm,
+                required=profile.vent.min_diameter_mm,
+                affected={"vent_stack_id": design.vent_stack.id},
+            )
+        )
+    if not design.vent_pipes:
+        results.append(
+            _check(
+                "VENT_ROUTING",
+                False,
+                "No fixture vents have been routed.",
+                profile.vent.source,
+                affected={"room_id": room.id},
+                fail_severity=Severity.WARNING,
+            )
+        )
+        return results
+    for fixture in design.fixtures:
+        connections = connections_for(fixture)
+        if connections.vent is None:
+            continue
+        pipe = next(
+            (item for item in design.vent_pipes if item.from_node == fixture.id),
+            None,
+        )
+        results.append(
+            _check(
+                "VENT_CONNECTIVITY",
+                pipe is not None,
+                f"{fixture.id} {'has' if pipe else 'has no'} vent connection.",
+                profile.vent.source,
+                affected={"fixture_id": fixture.id},
+            )
+        )
+        if pipe is None:
+            continue
+        results.append(
+            _check(
+                "VENT_DIAMETER",
+                pipe.diameter_mm + 0.1 >= profile.vent.min_diameter_mm,
+                f"{pipe.id} vent diameter {pipe.diameter_mm:g} mm; minimum "
+                f"{profile.vent.min_diameter_mm:g} mm.",
+                profile.vent.source,
+                measured=pipe.diameter_mm,
+                required=profile.vent.min_diameter_mm,
+                affected={"pipe_id": pipe.id},
+            )
+        )
+        length = polyline_length(pipe.points)
+        results.append(
+            _check(
+                "VENT_BRANCH_LENGTH",
+                length <= profile.vent.max_branch_mm_warning,
+                f"{pipe.id} vent length {length:.0f} mm; warning threshold "
+                f"{profile.vent.max_branch_mm_warning:.0f} mm.",
+                profile.vent.source,
+                measured=round(length, 1),
+                required=profile.vent.max_branch_mm_warning,
+                affected={"pipe_id": pipe.id},
+                fail_severity=Severity.WARNING,
+            )
+        )
+    return results
+
+
+def _supply_results(building, room, design, profile: RuleProfile) -> list[ValidationResult]:
+    results: list[ValidationResult] = []
+    source = design.water_source
+    if source is None:
+        results.append(
+            _check(
+                "WATER_SOURCE",
+                False,
+                "No cold/hot water source has been created.",
+                profile.supply.source,
+                fail_severity=Severity.WARNING,
+            )
+        )
+        return results
+    results.append(
+        _check(
+            "WATER_PRESSURE",
+            source.pressure_kpa + 0.1 >= profile.supply.min_pressure_kpa,
+            f"Supply pressure {source.pressure_kpa:.0f} kPa; minimum "
+            f"{profile.supply.min_pressure_kpa:.0f} kPa.",
+            profile.supply.source,
+            measured=source.pressure_kpa,
+            required=profile.supply.min_pressure_kpa,
+        )
+    )
+    results.append(
+        _check(
+            "WATER_HEATER",
+            (not source.heater) or source.heater_capacity_l + 0.1 >= profile.supply.heater_min_l,
+            f"Water heater {source.heater_capacity_l:.0f} L; minimum "
+            f"{profile.supply.heater_min_l:.0f} L.",
+            profile.supply.source,
+            measured=source.heater_capacity_l,
+            required=profile.supply.heater_min_l,
+            fail_severity=Severity.WARNING,
+        )
+    )
+    for fixture in design.fixtures:
+        connections = connections_for(fixture)
+        for point, system, sizes in (
+            (connections.cold, SupplySystem.COLD, profile.supply.cold_fixture_mm),
+            (connections.hot, SupplySystem.HOT, profile.supply.hot_fixture_mm),
+        ):
+            if point is None:
+                continue
+            pipes = [
+                item
+                for item in design.supply_pipes
+                if item.to_node == fixture.id and item.system == system
+            ]
+            expected = sizes.get(fixture.type.value)
+            results.append(
+                _check(
+                    "SUPPLY_CONNECTIVITY",
+                    bool(pipes),
+                    f"{fixture.id} {'has' if pipes else 'has no'} "
+                    f"{system.value.lower()} supply.",
+                    profile.supply.source,
+                    affected={"fixture_id": fixture.id, "system": system.value},
+                )
+            )
+            if pipes and expected is not None:
+                pipe = pipes[0]
+                results.append(
+                    _check(
+                        "SUPPLY_SIZE",
+                        pipe.diameter_mm + 0.1 >= expected,
+                        f"{pipe.id} diameter {pipe.diameter_mm:g} mm; minimum "
+                        f"{expected:g} mm.",
+                        profile.supply.source,
+                        measured=pipe.diameter_mm,
+                        required=expected,
+                        affected={"pipe_id": pipe.id},
+                        fail_severity=Severity.WARNING,
+                    )
+                )
+    stops = [
+        item for item in design.plumbing_items if item.type == PlumbingItemType.FIXTURE_STOP
+    ]
+    results.append(
+        _check(
+            "FIXTURE_STOPS",
+            len(stops) >= len(
+                [
+                    fixture
+                    for fixture in design.fixtures
+                    if connections_for(fixture).cold is not None
+                    or connections_for(fixture).hot is not None
+                ]
+            ),
+            f"{len(stops)} fixture stop(s) added.",
+            profile.supply.source,
+            fail_severity=Severity.WARNING,
+        )
+    )
+    return results
+
+
+def _equipment_results(design, profile: RuleProfile) -> list[ValidationResult]:
+    results: list[ValidationResult] = []
+    types = {item.type for item in design.plumbing_items}
+    if profile.cleanouts.stack_base_required:
+        results.append(
+            _check(
+                "STACK_CLEANOUT",
+                PlumbingItemType.CLEANOUT in types,
+                "Stack-base cleanout is present."
+                if PlumbingItemType.CLEANOUT in types
+                else "Stack-base cleanout is missing.",
+                profile.cleanouts.source,
+                fail_severity=Severity.WARNING,
+            )
+        )
+    results.append(
+        _check(
+            "MAIN_SHUTOFF",
+            PlumbingItemType.MAIN_SHUTOFF in types,
+            "Main water shutoff is present."
+            if PlumbingItemType.MAIN_SHUTOFF in types
+            else "Main water shutoff is missing.",
+            profile.supply.source,
+            fail_severity=Severity.WARNING,
+        )
+    )
+    if any(fixture.type == FixtureType.FLOOR_DRAIN for fixture in design.fixtures):
+        results.append(
+            _check(
+                "FLOOR_DRAIN_PRIMER",
+                PlumbingItemType.TRAP_PRIMER in types,
+                "Floor-drain trap primer is present."
+                if PlumbingItemType.TRAP_PRIMER in types
+                else "Floor-drain trap primer is missing.",
+                profile.cleanouts.source,
+                fail_severity=Severity.WARNING,
+            )
+        )
     return results
 
 

@@ -19,7 +19,7 @@ def test_renders_plan_with_rooms_doors_and_shaft(tmp_path):
     assert svg.startswith("<svg")
     assert svg.count('class="room"') >= 3
     assert "BATHROOM" in svg
-    assert 'class="door"' in svg
+    assert 'class="bg door-line"' in svg
     assert 'class="shaft"' in svg
 
 

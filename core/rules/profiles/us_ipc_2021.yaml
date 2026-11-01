@@ -9,6 +9,7 @@ room:
   wc_min_area_m2: 0.0
   wc_min_width_mm: 0.0
   bathroom_min_area_m2: 0.0
+  bathroom_min_width_mm: 0.0
   door_min_width_mm: 750.0
   source: "IPC does not set room minimums; fixture clearances govern."
 clearances:
@@ -52,3 +53,18 @@ sources:
   - "IPC 2021 Chapter 4 - Fixtures, faucets and fixture fittings"
   - "IPC 2021 Chapter 7 - Sanitary drainage"
   - "IPC 2021 Chapter 9 - Vents"
+
+supply:
+  cold_main_mm: 25.0
+  hot_main_mm: 20.0
+  cold_fixture_mm: {WC: 15.0, BASIN: 15.0, SHOWER: 15.0, KITCHEN_SINK: 15.0}
+  hot_fixture_mm: {BASIN: 15.0, SHOWER: 15.0, KITCHEN_SINK: 15.0}
+  max_velocity_m_s: 4.0
+  min_pressure_kpa: 140.0
+  heater_min_l: 40.0
+  material: PEX
+  source: "IPC 2021 Chapter 6"
+cleanouts:
+  stack_base_required: true
+  max_horizontal_run_mm: 15000.0
+  source: "IPC 2021 Chapter 7"

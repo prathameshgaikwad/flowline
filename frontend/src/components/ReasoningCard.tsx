@@ -12,20 +12,23 @@ export function ReasoningCard({
   return (
     <details
       open={defaultOpen}
-      className="group rounded-xl border border-violet-100 bg-violet-50/60 px-3 py-2"
+      className="group rounded-card border border-line bg-sunken/70"
     >
-      <summary className="flex cursor-pointer list-none items-center gap-2 text-[10px] font-bold uppercase tracking-[0.12em] text-violet-700">
-        <BrainCircuit size={13} />
-        Model reasoning
-        {iteration ? <span className="font-medium text-violet-400">· step {iteration}</span> : null}
-        <ChevronDown size={12} className="ml-auto transition group-open:rotate-180" />
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3.5 py-2.5 text-label font-semibold text-ink-soft">
+        <BrainCircuit size={16} className="text-muted" aria-hidden="true" />
+        How the assistant worked
+        {iteration ? (
+          <span className="font-normal text-muted">· step {iteration}</span>
+        ) : null}
+        <ChevronDown
+          size={14}
+          className="ml-auto text-muted transition-transform group-open:rotate-180"
+          aria-hidden="true"
+        />
       </summary>
-      <div className="mt-2 max-h-56 overflow-y-auto whitespace-pre-wrap border-t border-violet-100 pt-2 font-mono text-[10px] leading-relaxed text-violet-950/70">
+      <div className="mt-0 max-h-64 overflow-y-auto whitespace-pre-wrap border-t border-line px-3.5 py-3 text-label leading-relaxed text-muted">
         {content}
       </div>
-      <p className="mt-1 text-[9px] text-violet-400">
-        Provider-supplied reasoning; deterministic tool results remain authoritative.
-      </p>
     </details>
   );
 }

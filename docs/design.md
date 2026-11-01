@@ -4,9 +4,17 @@
 
 ## Intent
 
-Flowline is an agentic bathroom plumbing designer for AutoCAD-native workflows. It turns a DXF floor plan into ranked layouts, routed drainage, cited validation, deterministic fixes, and an AutoCAD-ready DXF. The LLM coordinates; deterministic Python owns the engineering.
+Flowline is an agentic floor plumbing designer for AutoCAD-native workflows. It turns a DXF floor plan into one coordinated multi-room plumbing design with ranked room layouts, routed drainage, vent and water services, cited validation, deterministic fixes, and an AutoCAD-ready DXF. The LLM coordinates; deterministic Python owns the engineering.
 
 This phase is deliberately **chat-first**. Home/project grouping is deferred; the workspace has one drawing and a designs list. Standards are per design, not per project.
+
+## Consolidated floor design (2026-11-01)
+
+- One `Design` can cover multiple selected rooms, with a `RoomPlan` per room and shared stacks, vents, water source, sheet, and schedules.
+- Imported rooms are classified from labels plus plumbing-fixture block hints. Bathrooms, powder rooms, kitchens, balconies, utility areas, and wash areas are selected automatically; users can click the plan or room list to adjust.
+- All detected shafts are available as stacks. Each room is assigned to the nearest stack by default and can be reassigned in setup.
+- The design sheet covers the whole selected floor and includes a room column in the schedules and all stack risers.
+- The legacy single-room request path remains supported; stored designs without room plans are normalized to one room.
 
 ## Decisions
 
@@ -54,7 +62,7 @@ This phase is deliberately **chat-first**. Home/project grouping is deferred; th
 ```
 
 - **Workspace sidebar:** drawing upload/sample, designs list with status, new design, provider badge.
-- **Setup:** plan preview, room, shaft, fixture chips, standard, start design.
+- **Setup:** plan preview, room, shaft or click-to-place stack, fixture chips, standard, start design.
 - **Chat:** user/agent turns; quick actions Compare, Validate, Apply fix, Explain, Review & export.
 - **Mission control:** Plan, Thinking, Decisions, Checks, Activity.
 - **Approval dialog:** counts, warnings, stale/error blockers, approver, download.
@@ -102,9 +110,18 @@ Atomic JSON writes and one active turn per design. The API hydrates sessions fro
 
 India NBC 2016 / IS 1742 (+ IPC clearances) and US IPC 2021, per design. Every validation result includes rule ID, measured/required, source and fix IDs. POC disclaimer everywhere.
 
+## DXF understanding
+
+- Layer roles classify walls, doors, windows, rooms, shafts and annotations.
+- Closed room polylines are used directly. Wall-line plans fall back to centreline extraction with collinear gap bridging, T-junction connectors and Shapely polygonization.
+- Room labels are matched to polygons; dimension notes and title text are rejected.
+- Block inserts are expanded with layer inheritance, so door/window blocks contribute real geometry.
+- Preview extents cover plan geometry only; title blocks, dimensions and notes are hidden.
+- A drawing with no shaft can use a user-picked stack point.
+
 ## Constraints
 
-- Python 3.13, Windows dev, React/Vite build, no AutoCAD required for tests.
+- Python 3.13, Windows dev, React/Vite build, no AutoCAD required for tests. Shapely/GEOS is required for wall-based room extraction.
 - Meta/OpenCode/OpenRouter providers; fake offline provider.
 - Local single-user JSON data.
 - Hackathon deadline 2026-11-04.

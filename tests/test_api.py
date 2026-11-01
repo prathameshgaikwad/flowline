@@ -3,7 +3,8 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import DESIGNS, app
+from core.models import DrawingCheck, Severity, ValidationResult
 
 client = TestClient(app)
 
@@ -75,6 +76,24 @@ def test_full_design_and_approval_flow():
     design = client.get(f"/api/designs/{design_id}")
     assert design.status_code == 200
     assert design.json()["svg"].startswith("<svg")
+    assert design.json()["sheet_ready"] is True
+    assert design.json()["sheet_pages"] >= 1
+    assert design.json()["drawing_review"]
+
+    sheet = client.get(f"/api/designs/{design_id}/sheet.svg")
+    assert sheet.status_code == 200
+    assert b"<svg" in sheet.content
+    pdf = client.get(f"/api/designs/{design_id}/sheet.pdf")
+    assert pdf.status_code == 200
+    assert pdf.content.startswith(b"%PDF")
+
+    resized = client.patch(
+        f"/api/designs/{design_id}/sheet",
+        json={"preset": "A4", "orientation": "landscape"},
+    )
+    assert resized.status_code == 200, resized.text
+    assert resized.json()["sheet"]["preset"] == "A4"
+    assert resized.json()["sheet_pages"] == 2
 
     approve = client.post(
         f"/api/designs/{design_id}/approve",
@@ -90,3 +109,61 @@ def test_full_design_and_approval_flow():
 
 def test_unknown_job_is_404():
     assert client.get("/api/jobs/nope").status_code == 404
+
+
+def test_approval_exports_with_validation_and_drawing_errors():
+    project = _sample()
+    bathroom = next(room for room in project["rooms"] if room["wet_area"])
+    start = client.post(
+        f"/api/projects/{project['project_id']}/design",
+        json={
+            "room_id": bathroom["id"],
+            "fixtures": ["WC", "BASIN", "SHOWER"],
+            "provider": "fake",
+            "profile_id": "india_nbc_2016",
+        },
+    )
+    assert start.status_code == 200, start.text
+    job_id = start.json()["job_id"]
+    design_id = start.json()["design_id"]
+    for _ in range(200):
+        job = client.get(f"/api/jobs/{job_id}").json()
+        if job["done"]:
+            break
+        time.sleep(0.05)
+    assert job["done"], job
+
+    session = DESIGNS[design_id]
+    session.validation.append(
+        ValidationResult(
+            rule_id="TEST_DESIGN_ERROR",
+            severity=Severity.ERROR,
+            message="Deliberate test design error.",
+            source="Test",
+        )
+    )
+    session.drawing_review.append(
+        DrawingCheck(
+            rule_id="TEST_DRAWING_ERROR",
+            severity=Severity.ERROR,
+            message="Deliberate test drawing error.",
+        )
+    )
+    if session.design is not None:
+        session.design.route_failures = ["Deliberate test route failure."]
+
+    approve = client.post(
+        f"/api/designs/{design_id}/approve",
+        json={"approver_name": "Test Engineer"},
+    )
+    assert approve.status_code == 200, approve.text
+    payload = approve.json()
+    assert payload["counts"]["ERROR"] >= 1
+    assert any(item["rule_id"] == "TEST_DESIGN_ERROR" for item in payload["validation"])
+    assert any(
+        item["rule_id"] == "TEST_DRAWING_ERROR"
+        for item in payload["drawing_review"]
+    )
+    assert payload["download_url"]
+    download = client.get(f"/api/designs/{design_id}/download.dxf")
+    assert download.status_code == 200

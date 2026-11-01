@@ -17,7 +17,7 @@ from agent.logging import ActionLogger
 from agent.loop import AgentRunner
 from agent.providers.base import ChatMessage, ConfigError
 from agent.providers.factory import create_provider
-from agent.tools import TOOLS, AgentSession, ToolError
+from agent.tools import TOOLS, AgentSession, RoomChoice, ToolError
 from app import storage
 from app.jobs import Job, JobManager
 from app.models import Project
@@ -27,10 +27,15 @@ from app.schemas import (
     FixRequest,
     MessageRequest,
     ProfileRequest,
+    RoomSelection,
+    SheetRequest,
 )
+from core.consolidated import nearest_stack, stacks_for_building
 from core.dxf_import import DxfImportError, import_dxf
 from core.fixes import FixError, apply_fix, recommend_fixes
 from core.models import Building, Severity, Stack
+from core.plumbing import build_plumbing
+from core.router import RouteError
 from core.rules.engine import (
     available_profiles,
     load_profile,
@@ -47,6 +52,7 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 PROJECTS: dict[str, Project] = {}
 DESIGNS: dict[str, AgentSession] = {}
 ACTIVE_TURNS: dict[str, str] = {}
+DELETING_DESIGNS: set[str] = set()
 STATE_LOCK = threading.RLock()
 JOBS = JobManager()
 
@@ -158,6 +164,29 @@ def get_project(project_id: str) -> dict:
     return _project_payload(_project(project_id))
 
 
+@app.delete("/api/projects/{project_id}")
+def delete_project(project_id: str) -> Response:
+    project = _project(project_id)
+    deleting = set(project.designs)
+    if not _cancel_turns_for_deletion(deleting):
+        _release_deleting(deleting)
+        raise HTTPException(
+            status_code=409,
+            detail="The assistant is still finishing a design in this drawing. Try deleting again in a moment.",
+        )
+
+    try:
+        with STATE_LOCK:
+            if not storage.delete_project(project_id):
+                raise HTTPException(status_code=404, detail="Unknown project.")
+            for design_id in deleting:
+                DESIGNS.pop(design_id, None)
+            PROJECTS.pop(project_id, None)
+    finally:
+        _release_deleting(deleting)
+    return Response(status_code=204)
+
+
 @app.get("/api/projects/{project_id}/svg")
 def project_svg(project_id: str) -> Response:
     project = _project(project_id)
@@ -197,9 +226,14 @@ def start_design(project_id: str, request: DesignRequest) -> dict:
     except ConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session = _new_design(project, request, provider)
+    room_text = "; ".join(
+        f"{project.building.room(choice.room_id).name or choice.room_id} with "
+        + ", ".join(item.value for item in choice.fixture_types)
+        for choice in session.room_choices
+    )
     content = request.request or (
-        f"Design the drainage for room {session.room_id} with "
-        f"{', '.join(item.value for item in session.fixture_types)} and explain the result."
+        f"Design the plumbing for {room_text}. "
+        "Use plan_room_layouts so every selected room stays in one design."
     )
     job = _start_turn(project, session, provider, content)
     return {
@@ -217,6 +251,40 @@ def get_design(design_id: str) -> dict:
     payload["messages"] = storage.load_messages(session.project_id, design_id)
     payload["events"] = storage.load_events(session.project_id, design_id)
     return payload
+
+
+@app.delete("/api/designs/{design_id}")
+def delete_design(design_id: str) -> Response:
+    project_id = storage.project_for_design(design_id)
+    if not project_id:
+        raise HTTPException(status_code=404, detail="Unknown design.")
+    project = _project(project_id)
+    if design_id not in project.designs:
+        raise HTTPException(status_code=404, detail="Unknown design.")
+    with STATE_LOCK:
+        if design_id in DELETING_DESIGNS:
+            raise HTTPException(
+                status_code=409,
+                detail="This design is already being deleted.",
+            )
+
+    deleting = {design_id}
+    if not _cancel_turns_for_deletion(deleting):
+        _release_deleting(deleting)
+        raise HTTPException(
+            status_code=409,
+            detail="The assistant is still finishing this run. Try deleting again in a moment.",
+        )
+
+    try:
+        with STATE_LOCK:
+            if not storage.delete_design(project.id, design_id):
+                raise HTTPException(status_code=404, detail="Unknown design.")
+            DESIGNS.pop(design_id, None)
+            PROJECTS.pop(project.id, None)
+    finally:
+        _release_deleting(deleting)
+    return Response(status_code=204)
 
 
 @app.get("/api/designs/{design_id}/messages")
@@ -263,6 +331,56 @@ def design_svg(design_id: str) -> Response:
     )
 
 
+@app.get("/api/designs/{design_id}/sheet.svg")
+def sheet_svg(design_id: str, page: int = Query(1, ge=1)) -> FileResponse:
+    session = _design(design_id)
+    if not session.sheet_ready or not session.sheet_path:
+        try:
+            TOOLS["prepare_sheet"].run({}, session)
+        except ToolError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        storage.save_design(session)
+    if page > session.sheet_pages:
+        raise HTTPException(status_code=404, detail="Unknown sheet page.")
+    path = session.out_dir / f"sheet-{page}.svg"
+    if not path.exists() and session.sheet_svg_path and page == 1:
+        path = Path(session.sheet_svg_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Sheet preview has not been generated.")
+    return FileResponse(path, media_type="image/svg+xml", filename=f"P-101-{page}.svg")
+
+
+@app.get("/api/designs/{design_id}/sheet.pdf")
+def sheet_pdf(design_id: str) -> FileResponse:
+    session = _design(design_id)
+    if not session.sheet_ready or not session.sheet_pdf_path:
+        try:
+            TOOLS["prepare_sheet"].run({}, session)
+        except ToolError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        storage.save_design(session)
+    if not session.sheet_pdf_path or not Path(session.sheet_pdf_path).exists():
+        raise HTTPException(status_code=404, detail="Sheet PDF has not been generated.")
+    return FileResponse(
+        session.sheet_pdf_path,
+        media_type="application/pdf",
+        filename=f"{design_id}-sheet.pdf",
+    )
+
+
+@app.patch("/api/designs/{design_id}/sheet")
+def update_sheet(design_id: str, request: SheetRequest) -> dict:
+    session = _design(design_id)
+    args = {key: value for key, value in request.model_dump().items() if value is not None}
+    try:
+        TOOLS["set_sheet_options"].run(args, session)
+        TOOLS["prepare_sheet"].run({}, session)
+    except ToolError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    storage.save_design(session)
+    return _design_payload(session)
+
+
 @app.patch("/api/designs/{design_id}")
 def update_design(design_id: str, request: ProfileRequest) -> dict:
     session = _design(design_id)
@@ -290,22 +408,45 @@ def update_design(design_id: str, request: ProfileRequest) -> dict:
 def fix_design(design_id: str, request: FixRequest) -> dict:
     session = _design(design_id)
     if session.design is None:
-        raise HTTPException(status_code=409, detail="No design selected.")
+        raise HTTPException(
+            status_code=409,
+            detail="There is no completed design to work with yet. Generate a design first.",
+        )
     fix = next((item for item in session.fixes if item.id == request.fix_id), None)
     if fix is None:
         raise HTTPException(status_code=404, detail="Unknown fix.")
     try:
         updated = apply_fix(
-            session.building, session.design, fix, session.profile(), session.candidates
+            session.building,
+            session.design,
+            fix,
+            session.profile(),
+            session.candidates,
+            session.candidates_by_room,
         )
     except FixError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     session.design = updated
     session.applied_fixes.append(fix.id)
+    try:
+        build_plumbing(session.building, updated, session.profile())
+    except RouteError:
+        pass
     session.validation = validate_design(session.building, updated, session.profile())
     session.fixes = recommend_fixes(
-        session.building, updated, session.validation, session.profile(), session.candidates
+        session.building,
+        updated,
+        session.validation,
+        session.profile(),
+        session.candidates,
+        session.candidates_by_room,
     )
+    session.sheet_ready = False
+    session.drawing_review = []
+    session.sheet_path = None
+    session.sheet_svg_path = None
+    session.sheet_pdf_path = None
+    session.sheet_pages = 0
     explained = TOOLS["explain_design"].run({}, session)
     session.final_answer = explained["explanation"]
     session.add_decision(
@@ -323,32 +464,21 @@ def fix_design(design_id: str, request: FixRequest) -> dict:
 def approve_design(design_id: str, request: ApproveRequest) -> dict:
     session = _design(design_id)
     if session.design is None:
-        raise HTTPException(status_code=409, detail="No design selected.")
-    if session.stale:
         raise HTTPException(
             status_code=409,
-            detail="The standard changed. Revalidate before approving.",
+            detail="There is no completed design to work with yet. Generate a design first.",
         )
     counts = summarize(session.validation)
-    if counts["ERROR"]:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "message": "Fix all ERRORs before export.",
-                "counts": counts,
-                "issues": [
-                    result.model_dump(mode="json")
-                    for result in session.validation
-                    if result.severity == Severity.ERROR
-                ],
-            },
-        )
     session.approved = True
     try:
         exported = TOOLS["export_dxf"].run({}, session)
     except ToolError as exc:
+        session.approved = False
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     profile = session.profile()
+    report_stacks = list(session.stacks.values()) or (
+        [session.stack] if session.stack is not None else []
+    )
     report = {
         "design_id": design_id,
         "approver": request.approver_name,
@@ -359,8 +489,14 @@ def approve_design(design_id: str, request: ApproveRequest) -> dict:
         "profile_name": profile.name,
         "disclaimer": profile.disclaimer,
         "counts": counts,
+        "room_ids": session.design.room_ids,
+        "stacks": [stack.model_dump(mode="json") for stack in report_stacks],
         "design": session.design.model_dump(mode="json"),
         "validation": [item.model_dump(mode="json") for item in session.validation],
+        "drawing_review": [
+            item.model_dump(mode="json") for item in session.drawing_review
+        ],
+        "sheet_pages": session.sheet_pages,
         "applied_fixes": session.applied_fixes,
         "exported_path": exported["path"],
     }
@@ -440,6 +576,31 @@ def _project(project_id: str) -> Project:
     return project
 
 
+def _cancel_turns_for_deletion(
+    design_ids: set[str], timeout: float = 30.0
+) -> bool:
+    with STATE_LOCK:
+        for design_id in design_ids:
+            job_id = ACTIVE_TURNS.get(design_id)
+            if job_id:
+                JOBS.cancel(job_id)
+            DELETING_DESIGNS.add(design_id)
+
+    deadline = time.monotonic() + timeout
+    while True:
+        with STATE_LOCK:
+            if not design_ids.intersection(ACTIVE_TURNS):
+                return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+
+
+def _release_deleting(design_ids: set[str]) -> None:
+    with STATE_LOCK:
+        DELETING_DESIGNS.difference_update(design_ids)
+
+
 def _design(design_id: str) -> AgentSession:
     with STATE_LOCK:
         session = DESIGNS.get(design_id)
@@ -452,6 +613,16 @@ def _design(design_id: str) -> AgentSession:
     session = storage.load_design(project, design_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Unknown design.")
+    if session.design is not None and session.validation:
+        session.fixes = recommend_fixes(
+            session.building,
+            session.design,
+            session.validation,
+            session.profile(),
+            session.candidates,
+            session.candidates_by_room,
+        )
+        storage.save_design(session)
     with STATE_LOCK:
         DESIGNS[design_id] = session
     return session
@@ -464,16 +635,87 @@ def _provider(requested: str | None):
     return create_provider(env)
 
 
+def _resolve_room_choices(
+    building: Building, request: DesignRequest
+) -> tuple[list[RoomChoice], dict[str, Stack]]:
+    if request.rooms:
+        selections = list(request.rooms)
+    elif request.room_id:
+        selections = [
+            RoomSelection(room_id=request.room_id, fixtures=request.fixtures)
+        ]
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Select at least one plumbing room.",
+        )
+
+    if request.stack is not None:
+        stacks = stacks_for_building(building, manual_stack=request.stack)
+    elif request.shaft_id and not request.rooms:
+        stacks = stacks_for_building(building, shaft_id=request.shaft_id)
+    else:
+        stacks = stacks_for_building(building)
+    if not stacks:
+        raise HTTPException(
+            status_code=400,
+            detail="No shaft found. Provide a stack point or draw a shaft.",
+        )
+    stack_map = {stack.id: stack for stack in stacks}
+
+    choices: list[RoomChoice] = []
+    seen: set[str] = set()
+    for selection in selections:
+        if selection.room_id in seen:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Room {selection.room_id} was selected more than once.",
+            )
+        seen.add(selection.room_id)
+        try:
+            room = building.room(selection.room_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        fixture_types = (
+            list(selection.fixtures)
+            if selection.fixtures is not None
+            else list(room.default_fixtures)
+        )
+        if not fixture_types:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Room {room.name or room.id} has no plumbing fixtures selected."
+                ),
+            )
+        stack = (
+            stack_map.get(selection.stack_id)
+            if selection.stack_id
+            else nearest_stack(room, stacks)
+        )
+        if stack is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown stack {selection.stack_id!r}.",
+            )
+        choices.append(
+            RoomChoice(
+                room_id=room.id,
+                fixture_types=fixture_types,
+                stack_id=stack.id,
+            )
+        )
+    return choices, stack_map
+
+
 def _new_design(project: Project, request: DesignRequest, provider) -> AgentSession:
-    try:
-        room = project.building.room(request.room_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    stack = _resolve_stack(project.building, request)
+    choices, stacks = _resolve_room_choices(project.building, request)
     try:
         load_profile(request.profile_id)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    primary = choices[0]
+    primary_stack = stacks[primary.stack_id]
     design_id = f"DES-{uuid.uuid4().hex[:8]}"
     out_dir = storage.design_dir(project.id, design_id)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -481,9 +723,11 @@ def _new_design(project: Project, request: DesignRequest, provider) -> AgentSess
         building=project.building,
         source_path=project.source_path,
         out_dir=out_dir,
-        room_id=room.id,
-        fixture_types=request.fixtures,
-        stack=stack,
+        room_id=primary.room_id,
+        fixture_types=list(primary.fixture_types),
+        stack=primary_stack,
+        stacks=stacks,
+        room_choices=choices,
         profile_id=request.profile_id,
         design_id=design_id,
         project_id=project.id,
@@ -509,10 +753,15 @@ def _start_turn(
 ) -> Job:
     design_id = session.design_id
     with STATE_LOCK:
+        if design_id in DELETING_DESIGNS:
+            raise HTTPException(
+                status_code=409,
+                detail="This design is being deleted. Choose another design.",
+            )
         if design_id in ACTIVE_TURNS:
             raise HTTPException(
                 status_code=409,
-                detail="The agent is already working on this design.",
+                detail="The assistant is already working on this design. Wait for the current run to finish, then try again.",
             )
         job = JOBS.create(project_id=project.id, design_id=design_id)
         ACTIVE_TURNS[design_id] = job.id
@@ -556,7 +805,11 @@ def _start_turn(
                 on_event=emit,
             )
             result = runner.run_turn(
-                content, session, history=history, request_id=current.id
+                content,
+                session,
+                history=history,
+                request_id=current.id,
+                should_cancel=current.cancel_requested.is_set,
             )
             session.final_answer = result.final_answer
             if session.design is not None:
@@ -587,26 +840,12 @@ def _start_turn(
     return job
 
 
-def _resolve_stack(building: Building, request: DesignRequest) -> Stack:
-    if request.stack is not None:
-        return Stack(id="S1", position=request.stack)
-    if request.shaft_id:
-        shaft = next(
-            (item for item in building.shafts if item.id == request.shaft_id), None
-        )
-        if shaft is None:
-            raise HTTPException(status_code=404, detail="Unknown shaft.")
-        return Stack(id="S1", position=shaft.position)
-    if building.shafts:
-        return Stack(id="S1", position=building.shafts[0].position)
-    raise HTTPException(
-        status_code=400,
-        detail="No shaft found. Provide a stack point or draw a shaft.",
-    )
+
 
 
 def _project_payload(project: Project) -> dict:
     building = project.building
+    stacks = stacks_for_building(building)
     return {
         "project_id": project.id,
         "name": project.name,
@@ -621,9 +860,30 @@ def _project_payload(project: Project) -> dict:
                 "width_mm": round(room.bbox.width, 1),
                 "height_mm": round(room.bbox.height, 1),
                 "wet_area": room.is_wet_area,
+                "plumbing_role": room.plumbing_role.value,
+                "default_fixtures": [
+                    fixture.value for fixture in room.default_fixtures
+                ],
+                "fixture_hints": [
+                    fixture.value for fixture in room.fixture_hints
+                ],
+                "default_stack_id": (
+                    nearest_stack(room, stacks).id
+                    if nearest_stack(room, stacks) is not None
+                    else None
+                ),
                 "closed": room.is_closed,
             }
             for room in building.rooms
+        ],
+        "stacks": [
+            {
+                "id": stack.id,
+                "x": stack.position.x,
+                "y": stack.position.y,
+                "diameter_mm": stack.diameter_mm,
+            }
+            for stack in stacks
         ],
         "doors": [
             {"id": door.id, "x": door.position.x, "y": door.position.y, "width_mm": door.width_mm}
@@ -667,9 +927,15 @@ def _design_summary(project: Project, design_id: str) -> dict:
         status = "drafted"
     else:
         status = "setup"
+    room_ids = (
+        session.design.room_ids
+        if session.design is not None
+        else [choice.room_id for choice in session.room_choices]
+    )
     return {
         "design_id": design_id,
         "room_id": session.room_id,
+        "room_ids": room_ids,
         "profile_id": session.profile_id,
         "layout_id": session.design.layout_id if session.design else None,
         "status": status,
@@ -697,10 +963,45 @@ def _design_payload(
         if result.severity != Severity.PASS
     ]
     selected_id = design.layout_id if design else None
+    room_ids = design.room_ids if design else [
+        choice.room_id for choice in session.room_choices
+    ]
+    room_plans = (
+        [plan.model_dump(mode="json") for plan in design.room_plans]
+        if design
+        else [
+            {
+                "room_id": choice.room_id,
+                "fixture_types": [item.value for item in choice.fixture_types],
+                "layout_id": None,
+                "stack_id": choice.stack_id,
+                "rationale": None,
+            }
+            for choice in session.room_choices
+        ]
+    )
+    stacks = list(session.stacks.values())
+    if not stacks and session.stack is not None:
+        stacks = [session.stack]
     return {
         "design_id": session.design_id or (design.id if design else None),
         "project_id": session.project_id,
         "room_id": session.room_id,
+        "room_ids": room_ids,
+        "room_plans": room_plans,
+        "fixtures_by_room": [
+            {
+                "room_id": choice.room_id,
+                "fixtures": [item.value for item in choice.fixture_types],
+            }
+            for choice in session.room_choices
+        ],
+        "stacks": [stack.model_dump(mode="json") for stack in stacks],
+        "vent_stacks": (
+            [stack.model_dump(mode="json") for stack in design.vent_stacks]
+            if design
+            else []
+        ),
         "fixtures": [fixture.value for fixture in session.fixture_types],
         "stack": session.stack.model_dump(mode="json") if session.stack else None,
         "profile_id": profile.id,
@@ -728,6 +1029,43 @@ def _design_payload(
             for candidate in session.candidates
         ],
         "design": design.model_dump(mode="json") if design else None,
+        "vent_pipes": (
+            [pipe.model_dump(mode="json") for pipe in design.vent_pipes]
+            if design
+            else []
+        ),
+        "supply_pipes": (
+            [pipe.model_dump(mode="json") for pipe in design.supply_pipes]
+            if design
+            else []
+        ),
+        "plumbing_items": (
+            [item.model_dump(mode="json") for item in design.plumbing_items]
+            if design
+            else []
+        ),
+        "vent_stack": (
+            design.vent_stack.model_dump(mode="json")
+            if design and design.vent_stack
+            else None
+        ),
+        "water_source": (
+            design.water_source.model_dump(mode="json")
+            if design and design.water_source
+            else None
+        ),
+        "sheet": design.sheet.model_dump(mode="json") if design else None,
+        "drawing_review": [
+            item.model_dump(mode="json") for item in session.drawing_review
+        ],
+        "sheet_ready": session.sheet_ready,
+        "sheet_pages": session.sheet_pages,
+        "sheet_svg_url": f"/api/designs/{session.design_id}/sheet.svg"
+        if session.sheet_ready
+        else None,
+        "sheet_pdf_url": f"/api/designs/{session.design_id}/sheet.pdf"
+        if session.sheet_ready
+        else None,
         "validation": [result.model_dump(mode="json") for result in session.validation],
         "decisions": session.decisions,
         "plan": session.plan,

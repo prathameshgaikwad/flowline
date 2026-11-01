@@ -17,6 +17,44 @@ export class ApiError extends Error {
   }
 }
 
+function fallbackErrorMessage(status: number) {
+  if (status === 409) {
+    return "That action conflicts with the assistant's current work. Wait for the current run to finish, then try again.";
+  }
+  if (status === 405) {
+    return "That action isn't available right now. Refresh the page and try again.";
+  }
+  if (status >= 500) {
+    return "Something went wrong on the server. Please try again.";
+  }
+  return `Request failed (HTTP ${status}). Please try again.`;
+}
+
+function errorMessage(status: number, detail: unknown) {
+  let message = "";
+  if (typeof detail === "string") {
+    message = detail.trim();
+  } else if (
+    detail &&
+    typeof detail === "object" &&
+    "message" in detail &&
+    typeof detail.message === "string"
+  ) {
+    message = detail.message.trim();
+  }
+
+  if (
+    status === 409 &&
+    (!message || /^(method not allowed|conflict|http 409|409)$/i.test(message))
+  ) {
+    return fallbackErrorMessage(status);
+  }
+  if (status === 405) {
+    return fallbackErrorMessage(status);
+  }
+  return message || fallbackErrorMessage(status);
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, options);
   const text = await response.text();
@@ -28,11 +66,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
   if (!response.ok) {
     const detail = data.detail;
-    const message =
-      typeof detail === "string"
-        ? detail
-        : detail?.message || JSON.stringify(detail || data);
-    throw new ApiError(message || `HTTP ${response.status}`, response.status, detail);
+    const message = errorMessage(response.status, detail ?? data);
+    throw new ApiError(message, response.status, detail);
   }
   return data as T;
 }
@@ -50,6 +85,8 @@ export const api = {
   sample: (name = "apartment") =>
     request<Project>(`/api/projects/sample?name=${name}`, { method: "POST" }),
   project: (id: string) => request<Project>(`/api/projects/${id}`),
+  deleteProject: (id: string) =>
+    request<void>(`/api/projects/${id}`, { method: "DELETE" }),
   upload: (file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -58,14 +95,20 @@ export const api = {
   createDesign: (
     projectId: string,
     body: {
-      room_id: string;
-      fixtures: string[];
+      rooms: {
+        room_id: string;
+        fixtures: string[];
+        stack_id?: string | null;
+      }[];
       shaft_id?: string | null;
+      stack?: { x: number; y: number } | null;
       profile_id: string;
     },
   ) => request<DesignState>(`/api/projects/${projectId}/designs`, json(body)),
   design: (id: string) =>
     request<DesignState>(`/api/designs/${id}`),
+  deleteDesign: (id: string) =>
+    request<void>(`/api/designs/${id}`, { method: "DELETE" }),
   sendMessage: (id: string, content: string) =>
     request<{ job_id: string; design_id: string; provider: string; model: string }>(
       `/api/designs/${id}/messages`,
@@ -84,5 +127,22 @@ export const api = {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ profile_id }),
+    }),
+  updateSheet: (
+    designId: string,
+    body: {
+      preset?: string;
+      width_mm?: number;
+      height_mm?: number;
+      orientation?: string;
+      scale?: number;
+      include_riser?: boolean;
+      include_schedules?: boolean;
+    },
+  ) =>
+    request<DesignState>(`/api/designs/${designId}/sheet`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     }),
 };

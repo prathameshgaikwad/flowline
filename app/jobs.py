@@ -20,9 +20,13 @@ class Job:
     result: dict[str, Any] | None = None
     error: str | None = None
     created_at: float = field(default_factory=time.time)
+    cancel_requested: threading.Event = field(default_factory=threading.Event)
 
     def emit(self, event: dict[str, Any] | None) -> None:
         self.events.put(event)
+
+    def request_cancel(self) -> None:
+        self.cancel_requested.set()
 
 
 class JobManager:
@@ -39,6 +43,13 @@ class JobManager:
     def get(self, job_id: str) -> Job | None:
         with self._lock:
             return self.jobs.get(job_id)
+
+    def cancel(self, job_id: str) -> bool:
+        job = self.get(job_id)
+        if job is None:
+            return False
+        job.request_cancel()
+        return True
 
     def start(self, job: Job, work) -> None:
         def runner() -> None:

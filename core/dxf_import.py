@@ -1,17 +1,34 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
 
 import ezdxf
+from ezdxf.path import from_hatch
+from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.ops import unary_union
 
-from core.geometry import Point, bbox, distance, point_in_polygon, polygon_area
-from core.models import Building, Door, DrawingEntity, Room, Shaft
+from core.geometry import Point, bbox, distance, polygon_area
+from core.layers import (
+    LayerRole,
+    classify_layer,
+    is_room_label_text,
+)
+from core.models import Building, Door, DrawingEntity, FixtureType, Shaft
+from core.plumbing_zones import fixture_hint_from_name
+from core.room_detect import detect_rooms
 from core.units import unit_scale
 
-ROOM_LAYER_TOKENS = ("room", "space", "area")
-DOOR_LAYER_TOKENS = ("door",)
-SHAFT_LAYER_TOKENS = ("shaft", "duct", "riser")
+PARSER_VERSION = 4
+MAX_BLOCK_DEPTH = 6
+HATCH_FLATTEN_MM = 5.0
+SANITARYWARE_TOKEN = "sanitaryware"
+FLOOR_HATCH_TOKEN = "hatch"
+ROOM_BBOX_OVERLAP_LIMIT = 0.5
+MIN_FLOOR_HATCH_ROOM_M2 = 1.0
+MAX_FLOOR_HATCH_ROOM_M2 = 50.0
+WALL_FILL_ROOM_OVERLAP_LIMIT = 0.5
 
 
 class DxfImportError(ValueError):
@@ -31,34 +48,41 @@ def import_dxf(path: str | Path) -> Building:
     msp = doc.modelspace()
 
     entities: list[DrawingEntity] = []
-    closed_polylines: list[tuple[list[Point], str]] = []
-    texts: list[tuple[str, Point]] = []
+    floor_hatches: list[DrawingEntity] = []
+    wall_fills: list[ShapelyPolygon] = []
     door_candidates: list[Door] = []
     shaft_candidates: list[Shaft] = []
+    skipped = 0
 
-    for entity in msp:
+    for entity, skip_door in _iter_entities(msp):
         try:
-            item, polyline, text, door, shaft = _read_entity(entity, scale)
+            if entity.dxftype().upper() == "HATCH":
+                hatch_items, hatch_fills = _read_hatch_entities(entity, scale)
+                entities.extend(hatch_items)
+                wall_fills.extend(hatch_fills)
+                floor_hatches.extend(_read_floor_hatch_polygons(entity, scale))
+                continue
+            item, door, shaft = _read_entity(entity, scale, detect_door=not skip_door)
         except Exception:
+            skipped += 1
             continue
         if item is not None:
             entities.append(item)
-        if polyline is not None:
-            closed_polylines.append(polyline)
-        if text is not None:
-            texts.append(text)
         if door is not None:
             door_candidates.append(door)
         if shaft is not None:
             shaft_candidates.append(shaft)
 
-    warnings = list(scale.warnings)
-    rooms = _detect_rooms(closed_polylines, texts)
-    if not rooms:
-        warnings.append(
-            "No closed room boundaries found. Draw a closed polyline on A-ROOM "
-            "or use the manual rectangle fallback."
-        )
+    room_result = detect_rooms(entities)
+    room_result.rooms = _drop_wall_fill_rooms(room_result.rooms, wall_fills)
+    inferred_rooms = room_result.rooms
+    room_result.rooms = _merge_floor_hatch_rooms(
+        room_result.rooms, floor_hatches, entities
+    )
+    _assign_fixture_hints(room_result.rooms, entities, generic_rooms=inferred_rooms)
+    warnings = list(scale.warnings) + list(room_result.warnings)
+    if skipped:
+        warnings.append(f"{skipped} DXF entit{'y' if skipped == 1 else 'ies'} could not be read.")
 
     doors = _dedupe_doors(door_candidates)
     if not doors:
@@ -72,7 +96,7 @@ def import_dxf(path: str | Path) -> Building:
         id=source.stem,
         units=scale.units.value,
         source_scale=scale.mm_per_unit,
-        rooms=rooms,
+        rooms=room_result.rooms,
         doors=doors,
         shafts=shafts,
         entities=entities,
@@ -80,131 +104,377 @@ def import_dxf(path: str | Path) -> Building:
     )
 
 
-def _read_entity(entity, scale):
+def _iter_entities(
+    entities: Iterable,
+    *,
+    skip_door: bool = False,
+    depth: int = 0,
+):
+    """Yield model entities, expanding block references into transformed geometry."""
+    for entity in entities:
+        kind = entity.dxftype().upper()
+        if kind == "INSERT" and depth < MAX_BLOCK_DEPTH:
+            layer = str(entity.dxf.get("layer", "0"))
+            name = str(entity.dxf.get("name", ""))
+            try:
+                children = list(entity.virtual_entities())
+            except Exception:
+                children = []
+            if children:
+                door_insert = classify_layer(layer) == LayerRole.DOOR or "door" in name.lower()
+                fixture_insert = fixture_hint_from_name(name, layer) is not None
+                if door_insert or fixture_insert:
+                    anchor = _entities_center(children)
+                    if anchor is not None:
+                        entity.dxf.insert = (anchor.x, anchor.y, 0.0)
+                        entity.dxf.extrusion = (0.0, 0.0, 1.0)
+                    yield entity, skip_door
+                child_skip_door = skip_door or door_insert
+                for child in children:
+                    child_layer = str(child.dxf.get("layer", "0"))
+                    if child_layer in ("", "0") and layer not in ("", "0"):
+                        try:
+                            child.dxf.layer = layer
+                        except Exception:
+                            pass
+                    yield from _iter_entities(
+                        [child], skip_door=child_skip_door, depth=depth + 1
+                    )
+                continue
+        yield entity, skip_door
+
+
+def _read_entity(entity, scale, *, detect_door: bool = True):
     kind = entity.dxftype().upper()
     layer = str(entity.dxf.get("layer", "0"))
+    role = classify_layer(layer)
     item: DrawingEntity | None = None
-    polyline: tuple[list[Point], str] | None = None
-    text: tuple[str, Point] | None = None
     door: Door | None = None
     shaft: Shaft | None = None
 
     if kind == "LWPOLYLINE":
-        points = [_point(x, y, scale) for x, y in entity.get_points("xy")]
+        points = [_point(p.x, p.y, scale) for p in entity.vertices_in_wcs()]
         closed = bool(entity.closed)
-        item = DrawingEntity(kind="polyline", layer=layer, points=points)
-        if closed and len(points) >= 3:
-            polyline = (points, layer)
-            if any(token in layer.lower() for token in SHAFT_LAYER_TOKENS):
-                box = bbox(points)
-                shaft = Shaft(
-                    id=f"S-{round(box.center.x)}-{round(box.center.y)}",
-                    position=box.center,
-                    width_mm=box.width,
-                    depth_mm=box.height,
-                )
+        item = DrawingEntity(
+            kind="polyline",
+            layer=layer,
+            role=role.value,
+            points=points,
+            closed=closed,
+        )
+        if closed and role == LayerRole.SHAFT and len(points) >= 3:
+            shaft = _shaft_from_points(points)
     elif kind == "POLYLINE":
-        raw = list(entity.points())
-        points = [_point(p.x, p.y, scale) for p in raw]
+        points = [_point(p.x, p.y, scale) for p in entity.points_in_wcs()]
         closed = bool(entity.is_closed)
-        item = DrawingEntity(kind="polyline", layer=layer, points=points)
-        if closed and len(points) >= 3:
-            polyline = (points, layer)
-            if any(token in layer.lower() for token in SHAFT_LAYER_TOKENS):
-                box = bbox(points)
-                shaft = Shaft(
-                    id=f"S-{round(box.center.x)}-{round(box.center.y)}",
-                    position=box.center,
-                    width_mm=box.width,
-                    depth_mm=box.height,
-                )
+        item = DrawingEntity(
+            kind="polyline",
+            layer=layer,
+            role=role.value,
+            points=points,
+            closed=closed,
+        )
+        if closed and role == LayerRole.SHAFT and len(points) >= 3:
+            shaft = _shaft_from_points(points)
     elif kind == "LINE":
         start = _point(entity.dxf.start.x, entity.dxf.start.y, scale)
         end = _point(entity.dxf.end.x, entity.dxf.end.y, scale)
-        item = DrawingEntity(kind="line", layer=layer, points=[start, end])
-        if any(token in layer.lower() for token in DOOR_LAYER_TOKENS):
+        item = DrawingEntity(
+            kind="line",
+            layer=layer,
+            role=role.value,
+            points=[start, end],
+        )
+        length = distance(start, end)
+        if detect_door and role == LayerRole.DOOR and length >= 300:
             midpoint = Point(x=(start.x + end.x) / 2, y=(start.y + end.y) / 2)
             door = Door(
                 id=f"D-{round(midpoint.x)}-{round(midpoint.y)}",
                 position=midpoint,
-                width_mm=distance(start, end) or 900.0,
+                width_mm=length,
             )
     elif kind == "CIRCLE":
-        center = _point(entity.dxf.center.x, entity.dxf.center.y, scale)
-        radius = float(entity.dxf.radius) * scale.mm_per_unit
-        item = DrawingEntity(kind="circle", layer=layer, center=center, radius=radius)
+        center = _wcs_point(entity, entity.dxf.center, scale)
+        radius = abs(float(entity.dxf.radius)) * scale.mm_per_unit
+        item = DrawingEntity(
+            kind="circle",
+            layer=layer,
+            role=role.value,
+            center=center,
+            radius=radius,
+        )
     elif kind == "ARC":
-        center = _point(entity.dxf.center.x, entity.dxf.center.y, scale)
-        radius = float(entity.dxf.radius) * scale.mm_per_unit
-        item = DrawingEntity(kind="arc", layer=layer, center=center, radius=radius)
+        center = _wcs_point(entity, entity.dxf.center, scale)
+        radius = abs(float(entity.dxf.radius)) * scale.mm_per_unit
+        item = DrawingEntity(
+            kind="arc",
+            layer=layer,
+            role=role.value,
+            points=_flatten_arc(entity, scale),
+            center=center,
+            radius=radius,
+            start_angle=float(entity.dxf.start_angle),
+            end_angle=float(entity.dxf.end_angle),
+        )
     elif kind in ("TEXT", "MTEXT"):
         raw_text = entity.plain_text() if kind == "MTEXT" else str(entity.dxf.text)
-        position = _point(entity.dxf.insert.x, entity.dxf.insert.y, scale)
-        item = DrawingEntity(kind="text", layer=layer, position=position, text=raw_text)
-        if raw_text.strip():
-            text = (raw_text.strip(), position)
+        position = _wcs_point(entity, entity.dxf.insert, scale)
+        text_role = (
+            LayerRole.ROOM_LABEL.value
+            if is_room_label_text(raw_text, layer)
+            else role.value
+        )
+        item = DrawingEntity(
+            kind="text",
+            layer=layer,
+            role=text_role,
+            text=raw_text,
+            position=position,
+        )
         if "shaft" in raw_text.lower():
             shaft = Shaft(id=f"S-{round(position.x)}-{round(position.y)}", position=position)
     elif kind == "INSERT":
-        position = _point(entity.dxf.insert.x, entity.dxf.insert.y, scale)
+        position = _wcs_point(entity, entity.dxf.insert, scale)
         name = str(entity.dxf.name)
-        item = DrawingEntity(kind="insert", layer=layer, position=position, block_name=name)
-        if any(token in name.lower() for token in DOOR_LAYER_TOKENS) or any(
-            token in layer.lower() for token in DOOR_LAYER_TOKENS
+        item = DrawingEntity(
+            kind="insert",
+            layer=layer,
+            role=role.value,
+            position=position,
+            block_name=name,
+        )
+        if detect_door and (
+            role == LayerRole.DOOR or any(token in name.lower() for token in ("door",))
         ):
             door = Door(
                 id=f"D-{round(position.x)}-{round(position.y)}",
                 position=position,
                 width_mm=_width_from_name(name),
             )
-    return item, polyline, text, door, shaft
+    return item, door, shaft
 
 
-def _detect_rooms(
-    closed_polylines: list[tuple[list[Point], str]], texts: list[tuple[str, Point]]
-) -> list[Room]:
-    candidates: list[tuple[list[Point], str, float]] = []
-    for points, layer in closed_polylines:
-        area_m2 = polygon_area(points) / 1_000_000.0
-        if not 0.8 <= area_m2 <= 100.0:
+def _entities_center(entities) -> Point | None:
+    xs: list[float] = []
+    ys: list[float] = []
+    for entity in entities:
+        kind = entity.dxftype().upper()
+        try:
+            if kind == "LWPOLYLINE":
+                points = list(entity.vertices_in_wcs())
+            elif kind == "POLYLINE":
+                points = list(entity.points_in_wcs())
+            elif kind == "LINE":
+                points = [entity.dxf.start, entity.dxf.end]
+            else:
+                points = []
+            for point in points:
+                xs.append(float(point.x))
+                ys.append(float(point.y))
+            if kind in ("ARC", "CIRCLE"):
+                center = entity.ocs().to_wcs(entity.dxf.center)
+                radius = abs(float(entity.dxf.radius))
+                xs.extend([center.x - radius, center.x + radius])
+                ys.extend([center.y - radius, center.y + radius])
+        except Exception:
             continue
-        candidates.append((points, layer, area_m2))
-    if not candidates:
+    if not xs or not ys:
+        return None
+    return Point(x=(min(xs) + max(xs)) / 2, y=(min(ys) + max(ys)) / 2)
+
+
+def _wcs_point(entity, point, scale) -> Point:
+    wcs = entity.ocs().to_wcs(point)
+    return _point(wcs.x, wcs.y, scale)
+
+
+def _flatten_arc(entity, scale) -> list[Point]:
+    try:
+        sagitta = HATCH_FLATTEN_MM / scale.mm_per_unit
+        return [_point(p.x, p.y, scale) for p in entity.flattening(sagitta)]
+    except Exception:
         return []
 
-    preferred = [
-        candidate
-        for candidate in candidates
-        if any(token in candidate[1].lower() for token in ROOM_LAYER_TOKENS)
-    ]
-    pool = preferred or candidates
 
-    rooms: list[Room] = []
-    for index, (points, _layer, _area) in enumerate(pool, start=1):
-        box = bbox(points)
-        name = _nearest_text_name(points, texts, box.center)
-        rooms.append(
-            Room(
-                id=f"R-{index:02d}",
-                name=name,
-                boundary=points,
+def _read_hatch_entities(entity, scale) -> tuple[list[DrawingEntity], list[ShapelyPolygon]]:
+    layer = str(entity.dxf.get("layer", "0"))
+    if classify_layer(layer) != LayerRole.WALL:
+        return [], []
+    items: list[DrawingEntity] = []
+    fills: list[ShapelyPolygon] = []
+    try:
+        paths = list(from_hatch(entity))
+    except Exception:
+        return items, fills
+    for path in paths:
+        try:
+            points = [
+                _point(p.x, p.y, scale)
+                for p in path.flattening(HATCH_FLATTEN_MM / scale.mm_per_unit)
+            ]
+        except Exception:
+            continue
+        if len(points) < 2:
+            continue
+        if path.is_closed and len(points) >= 3:
+            fill = ShapelyPolygon([(point.x, point.y) for point in points])
+            if not fill.is_valid:
+                fill = fill.buffer(0)
+            if not fill.is_empty:
+                fills.append(fill)
+        edge_count = len(points) if path.is_closed else len(points) - 1
+        for index in range(edge_count):
+            start = points[index]
+            end = points[(index + 1) % len(points)]
+            if start == end:
+                continue
+            items.append(
+                DrawingEntity(
+                    kind="line",
+                    layer=layer,
+                    role=LayerRole.WALL.value,
+                    points=[start, end],
+                )
+            )
+    return items, fills
+
+
+def _drop_wall_fill_rooms(rooms, fills: list[ShapelyPolygon]):
+    if not fills:
+        return rooms
+    union = unary_union(fills)
+    kept = []
+    for room in rooms:
+        polygon = ShapelyPolygon([(point.x, point.y) for point in room.boundary])
+        if not polygon.is_valid:
+            polygon = polygon.buffer(0)
+        if polygon.is_empty or polygon.area <= 0:
+            continue
+        overlap = polygon.intersection(union).area / polygon.area
+        if overlap < WALL_FILL_ROOM_OVERLAP_LIMIT:
+            kept.append(room)
+    return kept
+
+
+def _read_floor_hatch_polygons(entity, scale) -> list[DrawingEntity]:
+    layer = str(entity.dxf.get("layer", "0"))
+    lowered = layer.lower()
+    if FLOOR_HATCH_TOKEN not in lowered or "wall" in lowered:
+        return []
+    polygons: list[DrawingEntity] = []
+    try:
+        paths = list(from_hatch(entity))
+    except Exception:
+        return polygons
+    for path in paths:
+        if not path.is_closed:
+            continue
+        try:
+            points = [
+                _point(p.x, p.y, scale)
+                for p in path.flattening(HATCH_FLATTEN_MM / scale.mm_per_unit)
+            ]
+        except Exception:
+            continue
+        if len(points) < 4:
+            continue
+        area_m2 = polygon_area(points) / 1_000_000.0
+        if not MIN_FLOOR_HATCH_ROOM_M2 <= area_m2 <= MAX_FLOOR_HATCH_ROOM_M2:
+            continue
+        polygons.append(
+            DrawingEntity(
+                kind="polyline",
+                layer=layer,
+                role=LayerRole.ROOM.value,
+                points=points,
                 closed=True,
             )
         )
-    return rooms
+    return polygons
 
 
-def _nearest_text_name(
-    points: list[Point], texts: list[tuple[str, Point]], centroid: Point
-) -> str | None:
-    best: tuple[float, str] | None = None
-    for text, position in texts:
-        if not point_in_polygon(position, points):
+def _merge_floor_hatch_rooms(rooms, floor_hatches, entities):
+    if not floor_hatches:
+        return rooms
+    anchors = [
+        anchor
+        for entity in entities
+        if SANITARYWARE_TOKEN in entity.layer.lower()
+        if (anchor := _entity_anchor(entity)) is not None
+    ]
+    if not anchors:
+        return rooms
+    candidates = detect_rooms(floor_hatches).rooms
+    merged = list(rooms)
+    for candidate in candidates:
+        if not any(candidate.contains(anchor) for anchor in anchors):
             continue
-        score = distance(position, centroid)
-        if best is None or score < best[0]:
-            best = (score, text)
-    return best[1] if best is not None else None
+        if any(_room_overlap(candidate, room) >= ROOM_BBOX_OVERLAP_LIMIT for room in merged):
+            continue
+        merged.append(candidate)
+    for index, room in enumerate(merged, start=1):
+        room.id = f"R-{index:02d}"
+    return merged
+
+
+def _room_overlap(first, second) -> float:
+    a = first.bbox
+    b = second.bbox
+    width = max(0.0, min(a.maxx, b.maxx) - max(a.minx, b.minx))
+    height = max(0.0, min(a.maxy, b.maxy) - max(a.miny, b.miny))
+    intersection = width * height
+    smaller = min(a.width * a.height, b.width * b.height)
+    if smaller <= 0:
+        return 0.0
+    return intersection / smaller
+
+
+def _shaft_from_points(points: list[Point]) -> Shaft:
+    box = bbox(points)
+    return Shaft(
+        id=f"S-{round(box.center.x)}-{round(box.center.y)}",
+        position=box.center,
+        width_mm=box.width,
+        depth_mm=box.height,
+    )
+
+
+def _assign_fixture_hints(rooms, entities: list[DrawingEntity], *, generic_rooms=None) -> None:
+    for entity in entities:
+        if entity.kind != "insert" or entity.position is None:
+            continue
+        hint = fixture_hint_from_name(entity.block_name, entity.layer)
+        if hint is None:
+            continue
+        for room in rooms:
+            if room.contains(entity.position):
+                if hint not in room.fixture_hints:
+                    room.fixture_hints.append(hint)
+                break
+
+    generic_ids = None if generic_rooms is None else {id(room) for room in generic_rooms}
+    for entity in entities:
+        if SANITARYWARE_TOKEN not in entity.layer.lower():
+            continue
+        anchor = _entity_anchor(entity)
+        if anchor is None:
+            continue
+        for room in rooms:
+            if generic_ids is not None and id(room) not in generic_ids:
+                continue
+            if room.name is not None or not room.contains(anchor):
+                continue
+            if FixtureType.KITCHEN_SINK not in room.fixture_hints:
+                room.has_sanitaryware = True
+            break
+
+
+def _entity_anchor(entity: DrawingEntity) -> Point | None:
+    if entity.points:
+        return bbox(entity.points).center
+    if entity.center is not None:
+        return entity.center
+    return entity.position
 
 
 def _dedupe_doors(doors: list[Door]) -> list[Door]:

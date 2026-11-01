@@ -32,8 +32,7 @@ def test_fake_agent_completes_the_workflow(tmp_path):
     assert len(session.design.pipes) == 3
     tools = [item["tool"] for item in result.history]
     assert "inspect_plan" in tools
-    assert "list_layout_options" in tools
-    assert "select_layout" in tools
+    assert "plan_room_layouts" in tools
     assert "route_drainage" in tools
     assert "validate_design" in tools
     assert "explain_design" in tools
@@ -52,6 +51,19 @@ def test_fake_agent_uses_the_us_profile(tmp_path):
     assert diameters["WC"] == 76
     assert diameters["BASIN"] == 32
     assert diameters["SHOWER"] == 50
+
+
+def test_cancelled_turn_stops_before_tools_run(tmp_path):
+    session = make_session(tmp_path)
+    result = AgentRunner(FakeProvider()).run(
+        "Design the bathroom drainage.",
+        session,
+        should_cancel=lambda: True,
+    )
+
+    assert result.stopped_reason == "cancelled"
+    assert result.iterations == 0
+    assert session.design is None
 
 
 def test_repeat_guard(tmp_path):
@@ -116,3 +128,35 @@ def test_unknown_tool_is_returned_to_the_model(tmp_path):
     assert result.history[0]["success"] is False
     assert "Unknown tool" in result.history[0]["output"]["error"]
     assert result.stopped_reason == "final"
+
+
+class CountingProvider(LLMProvider):
+    name = "counting"
+    model = "counting"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def chat(self, messages, tools=None, tool_choice=None):
+        self.calls += 1
+        return LLMResponse(
+            content="I can help with that.",
+            model=self.model,
+            provider=self.name,
+        )
+
+
+def test_out_of_scope_requests_do_not_reach_the_model(tmp_path):
+    session = make_session(tmp_path)
+    provider = CountingProvider()
+    result = AgentRunner(provider).run("How do I reverse a palindrome?", session)
+    assert provider.calls == 0
+    assert result.final_answer == "I can only help with this MEP design."
+    assert session.design is None
+
+
+def test_mep_requests_still_reach_the_model(tmp_path):
+    session = make_session(tmp_path)
+    provider = CountingProvider()
+    AgentRunner(provider).run("What rooms are in this drawing?", session)
+    assert provider.calls == 1

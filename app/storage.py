@@ -9,9 +9,20 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from agent.tools import AgentSession
+from agent.tools import AgentSession, RoomChoice
 from app.models import Project
-from core.models import Building, Design, Fix, FixtureType, LayoutCandidate, Stack, ValidationResult
+from core.consolidated import normalize_design
+from core.dxf_import import PARSER_VERSION, DxfImportError, import_dxf
+from core.models import (
+    Building,
+    Design,
+    DrawingCheck,
+    Fix,
+    FixtureType,
+    LayoutCandidate,
+    Stack,
+    ValidationResult,
+)
 from core.svg import render_svg
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -43,6 +54,7 @@ def save_project(project: Project) -> None:
             "id": project.id,
             "name": project.name,
             "source_file": target.name,
+            "parser_version": PARSER_VERSION,
             "building": project.building.model_dump(mode="json"),
             "designs": project.designs,
             "created_at": project.created_at,
@@ -57,7 +69,7 @@ def load_project(project_id: str) -> Project | None:
         return None
     data = _read_json(path)
     source = workspace_dir(project_id) / data.get("source_file", "source.dxf")
-    return Project(
+    project = Project(
         id=str(data["id"]),
         name=str(data.get("name") or project_id),
         source_path=source,
@@ -66,6 +78,16 @@ def load_project(project_id: str) -> Project | None:
         created_at=float(data.get("created_at") or time.time()),
         updated_at=float(data.get("updated_at") or time.time()),
     )
+    parser_version = int(data.get("parser_version") or 0)
+    if not project.designs and source.exists() and parser_version < PARSER_VERSION:
+        try:
+            project.building = import_dxf(source)
+            save_project(project)
+        except DxfImportError as exc:
+            project.building.warnings.append(
+                f"Could not re-import the source drawing: {exc}"
+            )
+    return project
 
 
 def list_projects() -> list[Project]:
@@ -129,6 +151,73 @@ def register_design(project_id: str, design_id: str) -> None:
                 index = {}
         index[design_id] = project_id
         _write_json(DESIGN_INDEX, index)
+
+
+def delete_project(project_id: str) -> bool:
+    """Remove a drawing workspace, its source, designs, and index entries."""
+    with _LOCK:
+        project = load_project(project_id)
+        if project is None:
+            return False
+
+        target = workspace_dir(project_id)
+        root = WORKSPACES_DIR.resolve()
+        resolved = target.resolve()
+        if resolved.parent != root or resolved.name != project_id:
+            raise ValueError("Invalid project path.")
+
+        if DESIGN_INDEX.exists():
+            try:
+                index = _read_json(DESIGN_INDEX)
+            except Exception:
+                index = {}
+            if isinstance(index, dict):
+                changed = False
+                for design_id in project.designs:
+                    if design_id in index:
+                        index.pop(design_id, None)
+                        changed = True
+                if changed:
+                    _write_json(DESIGN_INDEX, index)
+
+        if resolved.exists():
+            shutil.rmtree(resolved)
+        return True
+
+
+def delete_design(project_id: str, design_id: str) -> bool:
+    """Remove a design and every file owned by it from the workspace."""
+    with _LOCK:
+        project = load_project(project_id)
+        if project is None:
+            return False
+
+        target = design_dir(project_id, design_id)
+        designs_root = (workspace_dir(project_id) / "designs").resolve()
+        resolved = target.resolve()
+        if resolved.parent != designs_root or resolved.name != design_id:
+            raise ValueError("Invalid design path.")
+
+        existed = resolved.exists()
+        listed = design_id in project.designs
+        if existed:
+            shutil.rmtree(resolved)
+        if listed:
+            project.designs = [
+                item for item in project.designs if item != design_id
+            ]
+            save_project(project)
+
+        if DESIGN_INDEX.exists():
+            try:
+                index = _read_json(DESIGN_INDEX)
+            except Exception:
+                index = {}
+            if isinstance(index, dict) and design_id in index:
+                index.pop(design_id, None)
+                _write_json(DESIGN_INDEX, index)
+
+        return existed or listed
 
 
 def project_for_design(design_id: str) -> str | None:
@@ -235,11 +324,29 @@ def session_to_dict(session: AgentSession) -> dict:
         "room_id": session.room_id,
         "fixture_types": [fixture.value for fixture in session.fixture_types],
         "stack": session.stack.model_dump(mode="json") if session.stack else None,
+        "stacks": [stack.model_dump(mode="json") for stack in session.stacks.values()],
+        "room_choices": [
+            {
+                "room_id": choice.room_id,
+                "fixture_types": [item.value for item in choice.fixture_types],
+                "stack_id": choice.stack_id,
+            }
+            for choice in session.room_choices
+        ],
         "profile_id": session.profile_id,
         "design": session.design.model_dump(mode="json") if session.design else None,
         "candidates": [
             candidate.model_dump(mode="json") for candidate in session.candidates
         ],
+        "candidates_by_room": {
+            room_id: [candidate.model_dump(mode="json") for candidate in candidates]
+            for room_id, candidates in session.candidates_by_room.items()
+        },
+        "selected_candidates": {
+            room_id: candidate.model_dump(mode="json")
+            for room_id, candidate in session.selected_candidates.items()
+        },
+        "room_rationales": dict(session.room_rationales),
         "validation": [
             result.model_dump(mode="json") for result in session.validation
         ],
@@ -253,6 +360,14 @@ def session_to_dict(session: AgentSession) -> dict:
         "model_name": session.model_name,
         "final_answer": session.final_answer,
         "applied_fixes": session.applied_fixes,
+        "drawing_review": [
+            item.model_dump(mode="json") for item in session.drawing_review
+        ],
+        "sheet_ready": session.sheet_ready,
+        "sheet_path": session.sheet_path,
+        "sheet_svg_path": session.sheet_svg_path,
+        "sheet_pdf_path": session.sheet_pdf_path,
+        "sheet_pages": session.sheet_pages,
     }
 
 
@@ -271,6 +386,20 @@ def session_from_dict(
         fixture_types=[FixtureType(item) for item in data.get("fixture_types") or []]
         or [FixtureType.WC, FixtureType.BASIN, FixtureType.SHOWER],
         stack=Stack.model_validate(data["stack"]) if data.get("stack") else None,
+        stacks={
+            item["id"]: Stack.model_validate(item)
+            for item in data.get("stacks") or []
+        },
+        room_choices=[
+            RoomChoice(
+                room_id=item["room_id"],
+                fixture_types=[
+                    FixtureType(value) for value in item.get("fixture_types") or []
+                ],
+                stack_id=str(item.get("stack_id") or "S1"),
+            )
+            for item in data.get("room_choices") or []
+        ],
         profile_id=str(data.get("profile_id") or "india_nbc_2016"),
         design_id=str(data.get("design_id") or out_dir.name),
         project_id=str(data.get("project_id") or ""),
@@ -283,17 +412,40 @@ def session_from_dict(
         decisions=list(data.get("decisions") or []),
         plan=list(data.get("plan") or []),
         stale=bool(data.get("stale")),
+        sheet_ready=bool(data.get("sheet_ready")),
+        sheet_path=data.get("sheet_path"),
+        sheet_svg_path=data.get("sheet_svg_path"),
+        sheet_pdf_path=data.get("sheet_pdf_path"),
+        sheet_pages=int(data.get("sheet_pages") or 0),
     )
     session.design = (
-        Design.model_validate(data["design"]) if data.get("design") else None
+        normalize_design(Design.model_validate(data["design"]))
+        if data.get("design")
+        else None
     )
-    session.candidates = [
-        LayoutCandidate.model_validate(item) for item in data.get("candidates") or []
-    ]
+    candidates_by_room = data.get("candidates_by_room") or {}
+    if candidates_by_room:
+        session.candidates_by_room = {
+            room_id: [LayoutCandidate.model_validate(item) for item in candidates]
+            for room_id, candidates in candidates_by_room.items()
+        }
+    else:
+        session.candidates = [
+            LayoutCandidate.model_validate(item)
+            for item in data.get("candidates") or []
+        ]
+    session.selected_candidates = {
+        room_id: LayoutCandidate.model_validate(item)
+        for room_id, item in (data.get("selected_candidates") or {}).items()
+    }
+    session.room_rationales = dict(data.get("room_rationales") or {})
     session.validation = [
         ValidationResult.model_validate(item) for item in data.get("validation") or []
     ]
     session.fixes = [Fix.model_validate(item) for item in data.get("fixes") or []]
+    session.drawing_review = [
+        DrawingCheck.model_validate(item) for item in data.get("drawing_review") or []
+    ]
     return session
 
 
@@ -305,4 +457,12 @@ def _write_json(path: Path, data) -> None:
 
 
 def _read_json(path: Path):
-    return json.loads(path.read_text(encoding="utf-8"))
+    last_error: Exception | None = None
+    for attempt in range(8):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (PermissionError, OSError) as exc:
+            last_error = exc
+            time.sleep(0.05 * (attempt + 1))
+    assert last_error is not None
+    raise last_error

@@ -1,18 +1,30 @@
 # Flowline
 
-**Agentic bathroom plumbing design for AutoCAD-native workflows.**
+**Agentic floor plumbing design for AutoCAD-native workflows.**
 
-Flowline turns a DXF floor plan into a reviewed bathroom drainage design: the agent inspects the plan, compares layouts, routes pipes, validates against a cited rule pack, fixes issues, and exports an AutoCAD-ready DXF. The workspace is chat-first, and every plan step, agent note, tool call, decision, rejected alternative, and validation result is visible.
+Flowline turns a DXF floor plan into one reviewed floor plumbing design: it detects and selects the plumbing areas, compares room layouts, routes drainage, vent, and hot/cold water to the available stacks, adds equipment and valves, validates against a cited rule pack, reviews the construction sheet, and exports an AutoCAD-ready DXF plus PDF. The workspace is design-first—the plan is the hero, the assistant sits beside it in a resizable panel, and every plan step, agent note, tool call, decision, rejected alternative, and validation result is one click away in Details.
 
-![Flowline chat workspace](docs/ui-chat.png)
+![Flowline design workspace](docs/ui-design.png)
+
+![Flowline setup workspace](docs/ui-setup.png)
+
+![Flowline construction sheet](docs/ui-sheet.png)
+
+![Flowline new design workspace](docs/ui-new-design.png)
 
 **Hackathon MVP.** Meta Global AI Developer Hackathon, Indie track. New work built during the event. Not a compliance tool.
 
 ## What is new
 
-- **Chat-first workspace.** Conversation, not a form wizard.
-- **Full agent visibility.** Plan stepper, provider reasoning, interim agent notes, tool timeline with arguments/results, selected and rejected layouts, fix history, and validation citations.
-- **Quick actions.** Compare layouts, validate, apply the best fix, explain decisions, and export.
+- **Design-first workspace.** The plan fills the canvas with zoom, pan, and a full-screen viewer. Chat sits in a resizable rail, and the setup flow stays out of the way. New Design opens a blank workspace with an upload and the open drawing.
+- **Consolidated floor plumbing.** Bathrooms, kitchens, balconies, utility areas, and other plumbing rooms are auto-selected and designed together as one coordinated floor system, while the plan stays clickable for manual inclusion or exclusion.
+- **Full plumbing services.** Drainage, fixture vents, hot/cold water, water source/heater, valves, cleanouts, floor-drain trap primer, and schedules across every selected room.
+- **Any-size construction sheet.** A4–A0, ANSI A–E, or custom; plan, riser diagram, schedules, legend, notes, blocks, dimensions, and title block. A3 default; automatic continuation sheets.
+- **Sheet preview and downloads.** Live SVG sheet preview, drawing checks, and PDF/DXF downloads after approval.
+- **MEP-scoped assistant.** Requests outside the plumbing design are refused; the agent does not answer coding, math, or general trivia.
+- **Architectural DXF import.** Rooms are inferred from wall geometry when room polylines are absent; door/window gaps are bridged, annotations are cropped from the preview, and door swings render correctly. If the drawing has no shaft, place the stack directly on the plan.
+- **Full agent visibility.** The Details drawer holds layout options, rejected alternatives, check citations, fix history, reasoning, and the full tool log.
+- **Quick actions.** Compare layouts, run checks, apply the best fix, prepare/review the sheet, explain decisions, and export.
 - **Per-design standards.** India NBC/IS + IPC clearances or US IPC; changing the standard marks the design stale until revalidated.
 - **JSON persistence.** Designs, messages, events, and audit logs survive server restarts.
 - **Deterministic engineering.** The model coordinates; Python owns geometry, pipe sizes, slopes, routing, and rule checks.
@@ -66,10 +78,11 @@ For frontend development, run `npm run dev` in `frontend/` (Vite proxies `/api` 
 ## Flow
 
 1. Upload a DXF or open the sample.
-2. Pick the room, stack, fixtures, and standard.
-3. Start the design. The chat shows the agent plan, notes, tool activity, candidate comparison, validation, and final answer.
-4. Ask follow-ups or use quick actions: compare, validate, apply fix, explain.
-5. Review the validation and assumptions, approve, and download the DXF.
+2. Choose **New design**. The workspace clears; upload a plan, or use the open drawing.
+3. Pick the room, drain stack, fixtures, and standard. Start the design. A live run card shows the agent's progress; the plan and plumbing systems appear in the canvas and the finished turn settles into a compact design summary.
+4. Review the sheet in **Sheet** view. Change the sheet size or orientation from the Sheet settings; the preview rebuilds.
+5. Ask follow-ups, or use the suggested actions menu to compare layouts, run checks, prepare the sheet, or review the drawing.
+6. Open Details for layouts, code checks, drawing review, and the full activity log. Review, approve, and download the DXF/PDF.
 
 ## Provider strategy
 
@@ -89,9 +102,11 @@ LLM_PROVIDER=auto (default)
 
 ```text
 React + Vite workspace
-  |-- chat, quick actions, plan preview
-  |-- mission control: plan / thinking / decisions / checks / activity
-  |-- approval dialog
+  |-- resizable plan canvas + assistant rail
+  |-- full-screen plan viewer with zoom, pan, and legend
+  |-- sheet view: SVG preview, any-size settings, page navigation
+  |-- details drawer: design / checks / activity
+  |-- workspace and settings menus, approval dialog
   |
 FastAPI + SSE jobs
   |
@@ -106,6 +121,10 @@ Deterministic tools
   |-- list_layout_options
   |-- select_layout
   |-- route_drainage
+  |-- route_services (vent + hot/cold water + equipment)
+  |-- prepare_sheet
+  |-- set_sheet_options
+  |-- review_drawing
   |-- validate_design
   |-- apply_fix
   |-- set_fixtures
@@ -118,10 +137,12 @@ Core engine
   |-- DXF import/export
   |-- units + geometry
   |-- layout generator
-  |-- A* router
+  |-- A* drainage/vent/supply router
   |-- cited rule packs
   |-- deterministic fixes
-  |-- SVG renderer
+  |-- sheet builder: blocks, dimensions, schedules, room, riser, title block
+  |-- SVG/PDF sheet renderer
+  |-- drawing review
 ```
 
 ## Persistence
@@ -163,14 +184,14 @@ python C:\Users\prath\.config\opencode\skill\webapp-testing\scripts\with_server.
   --port 8000 -- python scripts/ui_smoke_v2.py
 ```
 
-The suite covers units, geometry, DXF import, layout generation, routing, both rule packs, fixes, provider strategy, reasoning parsing, multi-turn chat, decisions, JSON persistence, API, DXF export, and an end-to-end CLI run.
+The suite covers units, geometry, DXF import, layout generation, drainage/vent/supply routing, both rule packs, fixes, construction-sheet generation and preview/PDF, drawing review, provider strategy, reasoning parsing, multi-turn chat, decisions, JSON persistence, API, DXF export, and an end-to-end CLI run.
 
 ## Layout
 
 ```text
 frontend/         React + Vite + TypeScript + Tailwind workspace
 app/              FastAPI app, JSON storage, SSE jobs, built UI
-core/             units, geometry, models, DXF import/export, layout, router, rules, fixes, SVG
+core/             units, geometry, models, DXF import/export, layout, plumbing, rules, fixes, sheet, SVG
 agent/            multi-turn loop, tools, prompt, audit log, provider strategy
 scripts/          sample generator, CLI demo, provider check, AutoCAD handoff, UI smoke
 samples/          apartment and tight-bathroom DXFs
@@ -180,10 +201,12 @@ docs/             design, standards, demo script, AutoCAD notes, submission note
 
 ## Limitations (this pass)
 
-- No home/project grouping or project-level standards yet. The left rail has a per-workspace **Designs** list as the seed.
+- No home/project grouping or project-level standards yet. The workspace menu has a per-drawing **Designs** list as the seed.
 - Standards are per design; changing one requires revalidation.
-- Drainage-only. Water supply and vent geometry are not modeled; long branches are warnings.
-- Simple rectangular rooms; the layout uses the bounding box and warns otherwise.
+- Vent and hot/cold water routes are schematic plan routes plus a schematic riser diagram; coordinate ceiling and wall voids. There is no full 3D coordination.
+- Supply sizing is a cited POC subset, not a full hydraulic calculation.
+- Room detection handles closed room polylines and architectural wall-line/band plans. Door and window gaps are closed for topology, and room labels are matched to enclosed spaces; verify inferred boundaries before issuing.
+- Wet-area layout still assumes a rectangular room bounding box. Irregular L-shaped wet rooms need a manual split.
 - JSON persistence is local and single-user.
 - No manual fixture dragging. The agent can change the fixture set and re-plan.
 - POC rule packs, not compliance certificates.
@@ -193,7 +216,7 @@ docs/             design, standards, demo script, AutoCAD notes, submission note
 
 1. Home tab + projects with multiple drawings and project-level standards.
 2. Manual fixture placement and a richer editing surface.
-3. Water supply + vent design, kitchens, multi-room/multi-floor.
+3. Multi-room/multi-floor plumbing, kitchens, and full hydraulic calculations.
 4. PDF/image intake with Muse vision, DWG/ODA, AutoCAD LT/.NET plugin.
 5. Revit/IFC, rule-pack authoring, project versions, engineer sign-off, BOQ.
 

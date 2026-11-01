@@ -6,7 +6,12 @@ import uuid
 from collections.abc import Callable
 
 from agent.logging import ActionLogger
-from agent.prompt import SYSTEM_PROMPT, build_context
+from agent.prompt import (
+    OUT_OF_SCOPE_REPLY,
+    SYSTEM_PROMPT,
+    build_context,
+    is_out_of_scope_request,
+)
 from agent.providers.base import ChatMessage, LLMError, LLMProvider
 from agent.tools import TOOLS, AgentSession, ToolError, tool_schemas
 
@@ -15,8 +20,12 @@ EventCallback = Callable[[dict], None]
 TOOL_STEP = {
     "inspect_plan": "inspect",
     "list_layout_options": "layouts",
+    "plan_room_layouts": "layouts",
     "select_layout": "select",
     "route_drainage": "route",
+    "route_services": "services",
+    "prepare_sheet": "sheet",
+    "review_drawing": "sheet",
     "validate_design": "validate",
     "apply_fix": "fix",
     "explain_design": "explain",
@@ -58,8 +67,15 @@ class AgentRunner:
         request: str,
         session: AgentSession,
         request_id: str | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> AgentResult:
-        return self.run_turn(request, session, history=None, request_id=request_id)
+        return self.run_turn(
+            request,
+            session,
+            history=None,
+            request_id=request_id,
+            should_cancel=should_cancel,
+        )
 
     def run_turn(
         self,
@@ -68,8 +84,13 @@ class AgentRunner:
         *,
         history: list[ChatMessage] | None = None,
         request_id: str | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> AgentResult:
         request_id = request_id or uuid.uuid4().hex[:8]
+        if is_out_of_scope_request(request):
+            return self._finish(
+                OUT_OF_SCOPE_REPLY, 0, [], "final", session, request_id
+            )
         tool_history: list[dict] = []
         conversation = [
             message
@@ -99,6 +120,15 @@ class AgentRunner:
         repeat_count = 0
         iterations = 0
         while iterations < self.max_iterations:
+            if should_cancel is not None and should_cancel():
+                return self._finish(
+                    "Stopped: the design was deleted.",
+                    iterations,
+                    tool_history,
+                    "cancelled",
+                    session,
+                    request_id,
+                )
             iterations += 1
             try:
                 response = self.provider.chat(messages, tools=tool_schemas())
@@ -273,6 +303,17 @@ class AgentRunner:
         elif tool == "list_layout_options":
             session.update_plan("select", "pending")
             session.update_plan("route", "pending")
+            session.update_plan("services", "pending")
+            session.update_plan("sheet", "pending")
+            session.update_plan("validate", "pending")
+            session.update_plan("fix", "pending")
+            session.update_plan("explain", "pending")
+        elif tool == "plan_room_layouts":
+            failures = output.get("failures") or []
+            session.update_plan("select", "error" if failures else "done")
+            session.update_plan("route", "pending")
+            session.update_plan("services", "pending")
+            session.update_plan("sheet", "pending")
             session.update_plan("validate", "pending")
             session.update_plan("fix", "pending")
             session.update_plan("explain", "pending")

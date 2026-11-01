@@ -25,6 +25,7 @@ class FakeProvider(LLMProvider):
         self._applied_ids: list[str] = []
         self._seq = 0
         self._intent: str | None = None
+        self._validation_output: dict = {}
 
     def chat(
         self,
@@ -60,7 +61,18 @@ class FakeProvider(LLMProvider):
         if tool_name == "get_design_state":
             return self._final(self._state_text(output))
         if tool_name == "inspect_plan":
-            return self._call("list_layout_options", {})
+            return self._call("plan_room_layouts", {})
+        if tool_name == "plan_room_layouts":
+            failures = output.get("failures") or []
+            if failures:
+                return self._final(
+                    "Could not plan every selected room: "
+                    + "; ".join(
+                        f"{item.get('room_id') or 'room'}: {item.get('error')}"
+                        for item in failures[:3]
+                    )
+                )
+            return self._call("route_drainage", {})
         if tool_name == "list_layout_options":
             if "error" in output:
                 return self._final(f"Could not list layouts: {output['error']}")
@@ -89,15 +101,23 @@ class FakeProvider(LLMProvider):
                     "No generated layout could be routed to the stack. "
                     "A human decision is needed: move the stack or relax the room constraints."
                 )
+            return self._call("route_services", {})
+        if tool_name == "route_services":
+            if "error" in output:
+                return self._final(
+                    f"Could not route vent/water services: {output['error']}"
+                )
             return self._call("validate_design", {})
         if tool_name == "validate_design":
             if self._intent == "validate":
-                return self._final(self._validation_text(output))
+                self._validation_output = output
+                return self._call("prepare_sheet", {})
             if self._intent == "fix":
                 fixes = output.get("fixes") or []
                 if fixes:
                     return self._call("apply_fix", {"fix_id": fixes[0]["id"]})
-                return self._final(self._validation_text(output))
+                self._validation_output = output
+                return self._call("prepare_sheet", {})
             fixes = output.get("fixes") or []
             if fixes and self._applied < 2:
                 fix = next(
@@ -108,15 +128,26 @@ class FakeProvider(LLMProvider):
                     self._applied += 1
                     self._applied_ids.append(fix["id"])
                     return self._call("apply_fix", {"fix_id": fix["id"]})
+            self._validation_output = output
+            return self._call("prepare_sheet", {})
+        if tool_name == "prepare_sheet":
+            if "error" in output:
+                return self._final(f"Could not prepare the sheet: {output['error']}")
+            return self._call("review_drawing", {})
+        if tool_name == "review_drawing":
+            counts = output.get("counts") or {}
+            if counts.get("ERROR"):
+                return self._final(
+                    f"Drawing review found {counts['ERROR']} error(s). "
+                    "Fix the sheet before export."
+                )
             return self._call("explain_design", {})
         if tool_name == "apply_fix":
             if "error" in output:
                 return self._final(f"Could not apply the fix: {output['error']}")
             if self._intent == "fix":
-                return self._final(
-                    f"Applied fix {output.get('applied')}. "
-                    f"Revalidated: {output.get('counts')}."
-                )
+                self._validation_output = output
+                return self._call("prepare_sheet", {})
             return self._call("validate_design", {})
         if tool_name == "explain_design":
             explanation = output.get("explanation") or "Design complete."

@@ -75,7 +75,7 @@ def test_design_chat_turns_and_reload():
     assert "Rejected" in job["result"]["final_answer"]
 
 
-def test_standard_change_marks_stale_and_blocks_approval():
+def test_standard_change_marks_stale_but_still_allows_export():
     project = _project()
     bathroom = next(room for room in project["rooms"] if room["wet_area"])
     created = client.post(
@@ -107,4 +107,5 @@ def test_standard_change_marks_stale_and_blocks_approval():
         f"/api/designs/{design_id}/approve",
         json={"approver_name": "Test Engineer"},
     )
-    assert approve.status_code == 409
+    assert approve.status_code == 200, approve.text
+    assert approve.json()["download_url"]
